@@ -1,47 +1,59 @@
 'use client';
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useCompany, usePlans, useFreePlanSettings, useUpdateCompanyPlan, useVerifyPayment } from "@/lib/query";
-import { Card } from "@/components/ui/card";
+import {
+  useCompany,
+  usePlans,
+  useFreePlanSettings,
+  useUpdateCompanyPlan,
+  useVerifyPayment,
+} from "@/lib/query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { FiCheck, FiArrowRight } from "react-icons/fi";
+import { Separator } from "@/components/ui/separator";
+import { FiCheck, FiLock, FiArrowRight, FiZap, FiAlertTriangle } from "react-icons/fi";
 import { CompanyHeader } from "@/components/CompanyHeader";
 import { useAuth } from "@/lib/redux";
 import { toast } from "sonner";
 import { getTranslatedValue } from "@/lib/utils/translations";
 import { useFullscreenContext } from "@/components/providers/FullscreenProvider";
-import { useState } from "react";
 import PaymentModal from "./PaymentModal";
+
+/* ─── helpers ────────────────────────────────────────────────────────────── */
+
+const NEON = "#CCFF00";
+const BLACK = "#0A0A0A";
+
+const getDaysText = (days: number, t: (k: string) => string, lang: string): string => {
+  if (lang.startsWith("ru")) {
+    if (days === 1) return t("admin.day");
+    if (days > 1 && days < 5) return t("admin.days2");
+    return t("admin.days");
+  }
+  if (lang.startsWith("kk")) return t("company.day");
+  return days === 1 ? "day" : "days";
+};
+
+/* ─── component ──────────────────────────────────────────────────────────── */
 
 const CompanyBilling = () => {
   const { isFullscreen } = useFullscreenContext();
   const { t, i18n } = useTranslation();
-  
-  // Helper function to get the correct day form in Russian
-  const getDaysText = (days: number): string => {
-    const lang = i18n.language || "ru";
-    if (lang.startsWith("ru")) {
-      if (days === 1) return t("admin.day");
-      if (days > 1 && days < 5) return t("admin.days2");
-      return t("admin.days");
-    }
-    if (lang.startsWith("kk")) {
-      return t("company.day");
-    }
-    // default en
-    return days === 1 ? "day" : "days";
-  };
-  const [paymentModal, setPaymentModal] = useState<{ open: boolean; planId: string; planName: string; planPrice: number }>({
-    open: false, planId: "", planName: "", planPrice: 0,
-  });
   const { user } = useAuth();
-  const { data: company, isLoading: companyLoading, refetch: refetchCompany } = useCompany(user?.companyId || 0, {
-    enabled: !!user?.companyId,
-  });
+
+  const [paymentModal, setPaymentModal] = useState<{
+    open: boolean;
+    planId: string;
+    planName: string;
+    planPrice: number;
+  }>({ open: false, planId: "", planName: "", planPrice: 0 });
+
+  const { data: company, isLoading: companyLoading, refetch: refetchCompany } =
+    useCompany(user?.companyId || 0, { enabled: !!user?.companyId });
   const { data: plans = [], isLoading: plansLoading } = usePlans();
   const { data: freePlanSettings, isLoading: freePlanSettingsLoading } = useFreePlanSettings();
-  
+
   const { mutate: updatePlan } = useUpdateCompanyPlan({
     onSuccess: () => {
       toast.success(t("company.switchingPlan"));
@@ -49,36 +61,23 @@ const CompanyBilling = () => {
       refetchCompany();
     },
     onError: (error: any) => {
-      const msg = error?.message || "";
-      const msgLower = msg.toLowerCase();
-      if (msgLower.includes("insufficient permissions") || msgLower.includes("access denied") || msgLower.includes("forbidden")) {
+      const msg = (error?.message || "").toLowerCase();
+      if (msg.includes("insufficient permissions") || msg.includes("access denied") || msg.includes("forbidden")) {
         toast.error(t("auth.accessDenied"));
       } else {
-        toast.error(msg || t("company.planSwitchError"));
+        toast.error(error?.message || t("company.planSwitchError"));
       }
     },
   });
-  
-  const handleUpgrade = async (planId: string) => {
-    if (!user?.companyId || !company) {
-      toast.error(t("common.error"));
-      return;
-    }
 
+  const { mutate: verifyPayment } = useVerifyPayment();
+
+  const handleUpgrade = (planId: string) => {
+    if (!user?.companyId || !company) return toast.error(t("common.error"));
     const selectedPlan = plans.find((p) => p.id === planId);
-    if (!selectedPlan) {
-      toast.error(t("company.planNotFound"));
-      return;
-    }
-
-    const planName = typeof selectedPlan.name === "string"
-      ? selectedPlan.name
-      : selectedPlan.name?.ru || selectedPlan.name?.en || selectedPlan.name?.kk || "";
-
+    if (!selectedPlan) return toast.error(t("company.planNotFound"));
     const isFree = selectedPlan.price === 0 || selectedPlan.isFree === true;
-
     if (!isFree) {
-      // Открываем модальное окно оплаты для платных планов
       setPaymentModal({
         open: true,
         planId,
@@ -87,25 +86,17 @@ const CompanyBilling = () => {
       });
       return;
     }
-
-    // Для бесплатного плана — переключаем сразу
-    updatePlan({
-      id: user.companyId,
-      plan: planName as any,
-    });
+    const planName =
+      typeof selectedPlan.name === "string"
+        ? selectedPlan.name
+        : selectedPlan.name?.ru || selectedPlan.name?.en || selectedPlan.name?.kk || "";
+    updatePlan({ id: user.companyId, plan: planName as any });
   };
-
-  const { mutate: verifyPayment } = useVerifyPayment();
 
   const handlePaymentSuccess = (orderId: string) => {
     if (!user?.companyId || !paymentModal.planId) return;
-
     verifyPayment(
-      {
-        companyId: user.companyId,
-        orderId,
-        planId: paymentModal.planId,
-      },
+      { companyId: user.companyId, orderId, planId: paymentModal.planId },
       {
         onSuccess: () => {
           toast.success(t("company.switchingPlan"));
@@ -113,286 +104,373 @@ const CompanyBilling = () => {
           refetchCompany();
         },
         onError: (error: any) => {
-          const msg = error?.message || "";
-          toast.error(msg || t("company.planSwitchError"));
+          toast.error(error?.message || t("company.planSwitchError"));
         },
       }
     );
   };
+
+  const lang = i18n.language || "ru";
+
   if (companyLoading || plansLoading || freePlanSettingsLoading) {
     return (
       <div className="flex min-h-screen bg-background">
         <div className="flex-1 flex items-center justify-center">
-          <p className="text-muted-foreground">{t("common.loading")}</p>
+          <span className="font-mono text-xs uppercase tracking-widest text-muted-foreground animate-pulse">
+            {t("common.loading")}
+          </span>
         </div>
       </div>
     );
   }
+
   const currentPlan = plans.find((p) => {
-    const planName = typeof p.name === "string" ? p.name : getTranslatedValue(p.name);
-    return planName === company?.plan || (typeof p.name === "object" && (p.name.ru === company?.plan || p.name.en === company?.plan || p.name.kk === company?.plan));
+    const pn = typeof p.name === "string" ? p.name : getTranslatedValue(p.name);
+    return (
+      pn === company?.plan ||
+      (typeof p.name === "object" &&
+        (p.name.ru === company?.plan || p.name.en === company?.plan || p.name.kk === company?.plan))
+    );
   });
+
+  const visiblePlans = plans.filter((plan) => {
+    const pn = typeof plan.name === "string" ? plan.name : getTranslatedValue(plan.name);
+    const isCurrent =
+      pn === company?.plan ||
+      (typeof plan.name === "object" &&
+        (plan.name.ru === company?.plan || plan.name.en === company?.plan || plan.name.kk === company?.plan));
+    const isFree = plan.price === 0 || plan.isFree === true;
+    if (isFree && company?.trialUsed && !isCurrent) return false;
+    return true;
+  });
+
+  /* ── trial countdown ── */
+  const trialEndDate = company?.trialEndDate ? new Date(company.trialEndDate) : null;
+  const planEndDate = company?.planEndDate ? new Date(company.planEndDate) : null;
+  const endDate = trialEndDate || planEndDate;
+  const daysLeft = endDate
+    ? Math.ceil((endDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+    : null;
+
+  /* ── plan accent colours ── */
+  const planAccent = (planId: string) => {
+    if (planId === "pro") return "#CCFF00";
+    if (planId === "standard") return "#FF3D00";
+    return "#71717A";
+  };
+
   return (
-    <div className={`min-h-screen bg-background flex flex-col overflow-x-hidden w-full ${isFullscreen ? 'h-auto overflow-y-auto' : ''}`}>
+    <div
+      className={`min-h-screen bg-background flex flex-col overflow-x-hidden w-full ${
+        isFullscreen ? "h-auto overflow-y-auto" : ""
+      }`}
+    >
       <CompanyHeader />
-      <div className={`flex flex-col flex-1 w-full min-h-0 ${isFullscreen ? 'h-auto overflow-visible block' : 'overflow-hidden'}`}>
-        <main className={`flex-1 px-6 py-4 w-full flex flex-col min-h-0 ${isFullscreen ? 'h-auto overflow-visible block' : 'overflow-y-auto'}`}>
-          <div className="flex flex-col gap-4 w-full min-h-0 pb-6">
-            {/* Current Plan Info Banner */}
-            {company && (
-              <Card className="p-4 sm:p-5 border-border shadow-lg relative overflow-hidden flex-shrink-0" style={{ background: 'linear-gradient(to bottom right, hsl(var(--primary) / 0.08), hsl(var(--primary) / 0.03))' }}>
-                <div className="absolute top-0 right-0 w-32 h-32 rounded-full -mr-16 -mt-16 opacity-10" style={{ backgroundColor: 'hsl(var(--primary))' }}></div>
-                <div className="relative z-10">
-                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2.5 mb-2">
-                        <h3 className="text-base sm:text-lg font-bold text-foreground">{t("company.yourTariff")}</h3>
-                        <Badge variant="outline" className="text-xs sm:text-sm px-2.5 py-0.5">
-                          {company.status === "Пробная"
-                            ? t("company.trialPeriod")
-                            : currentPlan
-                              ? getTranslatedValue(currentPlan.name)
-                              : company.plan || t("company.plan")}
+
+      <main
+        className={`flex-1 px-4 sm:px-6 py-6 w-full flex flex-col gap-6 ${
+          isFullscreen ? "h-auto overflow-visible" : "overflow-y-auto"
+        }`}
+      >
+        {/* ── PAGE TITLE ── */}
+        <div className="flex items-end gap-4">
+          <h1
+            className="text-brutal text-4xl sm:text-5xl font-black leading-none"
+            style={{ color: NEON, textShadow: `2px 2px 0 ${BLACK}` }}
+          >
+            {t("company.billing") || "BILLING"}
+          </h1>
+          <div className="h-[3px] flex-1 mb-2" style={{ backgroundColor: NEON }} />
+        </div>
+
+        {/* ── CURRENT PLAN BANNER ── */}
+        {company && (
+          <div
+            className="border-2 p-5 relative shadow-brutal"
+            style={{ borderColor: NEON, backgroundColor: "hsl(var(--card))" }}
+          >
+            {/* neon accent strip */}
+            <div
+              className="absolute top-0 left-0 h-full w-1"
+              style={{ backgroundColor: NEON }}
+            />
+            <div className="pl-4 flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="flex-1">
+                <p className="text-brutal text-xs text-muted-foreground mb-1">
+                  {t("company.yourTariff")}
+                </p>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="font-mono text-xl font-bold text-foreground">
+                    {company.status === "Trial"
+                      ? t("company.trialPeriod")
+                      : currentPlan
+                      ? getTranslatedValue(currentPlan.name)
+                      : company.plan || t("company.plan")}
+                  </span>
+                  {company.status === "Trial" && (
+                    <Badge
+                      className="text-brutal text-[10px] px-2"
+                      style={{ backgroundColor: NEON, color: BLACK, borderRadius: 0 }}
+                    >
+                      <FiZap className="mr-1 h-3 w-3" />
+                      {t("company.trialPeriod")}
+                    </Badge>
+                  )}
+                </div>
+
+                {/* Countdown */}
+                {daysLeft !== null && (
+                  <div className="mt-3 flex items-center gap-2 flex-wrap">
+                    <FiAlertTriangle
+                      className="h-4 w-4"
+                      style={{ color: daysLeft <= 5 ? "#FF3D00" : NEON }}
+                    />
+                    <span className="text-xs text-muted-foreground">
+                      {t("company.daysUntilTariffEnds")}:
+                    </span>
+                    <span
+                      className="font-mono font-black text-2xl leading-none"
+                      style={{ color: daysLeft <= 0 ? "#FF3D00" : daysLeft <= 5 ? "#FF3D00" : NEON }}
+                    >
+                      {daysLeft > 0 ? daysLeft : 0}
+                    </span>
+                    <span className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                      {getDaysText(Math.max(0, daysLeft), t, lang)}
+                    </span>
+                    {endDate && (
+                      <span className="text-xs text-muted-foreground">
+                        (
+                        {endDate.toLocaleDateString(
+                          lang === "kk" ? "kk-KZ" : lang === "en" ? "en-US" : "ru-RU",
+                          { day: "numeric", month: "long", year: "numeric" }
+                        )}
+                        )
+                      </span>
+                    )}
+                    {daysLeft <= 0 && (
+                      <Badge
+                        className="text-brutal text-[10px] px-2"
+                        style={{ backgroundColor: "#FF3D00", color: "#fff", borderRadius: 0 }}
+                      >
+                        {t("admin.tariffExpired")}
+                      </Badge>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Big price */}
+              <div className="text-right flex-shrink-0">
+                <span
+                  className="font-mono text-4xl font-black leading-none"
+                  style={{ color: NEON }}
+                >
+                  {company.status === "Trial"
+                    ? t("common.free")
+                    : currentPlan
+                    ? currentPlan.price === 0
+                      ? t("common.free")
+                      : `${currentPlan.price} ₸`
+                    : t("common.free")}
+                </span>
+                {currentPlan && currentPlan.price > 0 && (
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
+                    /{t("admin.perMonth")}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── SECTION HEADING: PLANS ── */}
+        <div>
+          <h2 className="text-brutal text-lg tracking-widest text-foreground mb-4">
+            {t("company.availablePlans")}
+          </h2>
+
+          {/* ── PLAN COMPARISON GRID ── */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch">
+            {visiblePlans.map((plan) => {
+              const pn = typeof plan.name === "string" ? plan.name : getTranslatedValue(plan.name);
+              const isCurrent =
+                pn === company?.plan ||
+                (typeof plan.name === "object" &&
+                  (plan.name.ru === company?.plan ||
+                    plan.name.en === company?.plan ||
+                    plan.name.kk === company?.plan));
+              const isFree = plan.price === 0 || plan.isFree === true;
+              const accent = planAccent(plan.id);
+              const isCurrentPlanExpired =
+                isCurrent && !isFree && company?.planEndDate && new Date(company.planEndDate) < new Date();
+              const isDisabled = isCurrent && !isCurrentPlanExpired;
+
+              /* Trial display */
+              const freeDays =
+                freePlanSettings?.freePeriodDays ?? plan.freePeriodDays ?? 0;
+              const trialDaysLeft =
+                isCurrent && company?.trialEndDate
+                  ? Math.ceil(
+                      (new Date(company.trialEndDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+                    )
+                  : null;
+
+              return (
+                <div
+                  key={plan.id}
+                  className="flex flex-col border-2 relative transition-all"
+                  style={{
+                    borderColor: isCurrent ? accent : "hsl(var(--border))",
+                    boxShadow: isCurrent ? `6px 6px 0 ${accent}` : "none",
+                    backgroundColor: "hsl(var(--card))",
+                  }}
+                >
+                  {/* Plan accent header bar */}
+                  <div
+                    className="h-1 w-full flex-shrink-0"
+                    style={{ backgroundColor: accent }}
+                  />
+
+                  <div className="flex flex-col flex-1 p-5">
+                    {/* Name + current badge */}
+                    <div className="flex items-center justify-between mb-3">
+                      <span
+                        className="text-brutal font-black text-base tracking-widest"
+                        style={{ color: accent }}
+                      >
+                        {getTranslatedValue(plan.name)}
+                      </span>
+                      {isCurrent && (
+                        <Badge
+                          className="text-brutal text-[9px] px-2 flex items-center gap-1"
+                          style={{ backgroundColor: accent, color: BLACK, borderRadius: 0 }}
+                        >
+                          <FiCheck className="h-2.5 w-2.5" />
+                          {t("company.current")}
                         </Badge>
-                      </div>
-                      {(company.trialEndDate || company.planEndDate) && (() => {
-                        const endDateStr = company.trialEndDate || company.planEndDate!;
-                        const endDate = new Date(endDateStr);
-                        const now = new Date();
-                        const diffTime = endDate.getTime() - now.getTime();
-                        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                      )}
+                    </div>
+
+                    {/* Big price */}
+                    <div className="mb-5">
+                      {isFree ? (
+                        <>
+                          <span className="font-mono text-4xl font-black text-foreground leading-none">
+                            {trialDaysLeft !== null
+                              ? trialDaysLeft > 0
+                                ? `${trialDaysLeft}`
+                                : "0"
+                              : `${freeDays}`}
+                          </span>
+                          <span className="font-mono text-base text-muted-foreground ml-1">
+                            {getDaysText(trialDaysLeft ?? freeDays, t, lang)}
+                          </span>
+                          <p className="text-[10px] uppercase tracking-widest text-muted-foreground mt-1">
+                            {t("company.trialAccess")}
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <span className="font-mono text-4xl font-black leading-none" style={{ color: accent }}>
+                            {plan.price}
+                          </span>
+                          <span className="font-mono text-base text-muted-foreground ml-1">₸</span>
+                          <span className="text-[10px] uppercase tracking-widest text-muted-foreground ml-1">
+                            /{t("admin.perMonth")}
+                          </span>
+                        </>
+                      )}
+
+                      {/* Renewal countdown for current paid plan */}
+                      {isCurrent && !isFree && company?.planEndDate && (() => {
+                        const d = Math.ceil(
+                          (new Date(company.planEndDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+                        );
                         return (
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-xs text-muted-foreground">{t("company.daysUntilTariffEnds")}:</p>
-                            {diffDays > 0 ? (
-                              <Badge className={`${diffDays <= 5 ? "bg-orange-500" : "bg-primary"} text-white text-xs px-2.5 py-0.5 font-semibold`}>
-                                {diffDays} {getDaysText(diffDays)}
-                              </Badge>
-                            ) : (
-                              <Badge className="bg-destructive text-white text-xs px-2.5 py-0.5 font-semibold">
-                                {t("admin.tariffExpired")}
-                              </Badge>
-                            )}
-                            <span className="text-xs text-muted-foreground">
-                              ({new Date(endDateStr).toLocaleDateString(i18n.language === "kk" ? "kk-KZ" : i18n.language === "en" ? "en-US" : "ru-RU", {
-                                day: "numeric",
-                                month: "long",
-                                year: "numeric"
-                              })})
+                          <div className="mt-2 pt-2 border-t border-dashed border-border flex justify-between text-xs">
+                            <span className="text-muted-foreground">{t("admin.daysUntilExpiry")}</span>
+                            <span
+                              className="font-mono font-bold"
+                              style={{ color: d <= 0 ? "#FF3D00" : d <= 5 ? "#FF3D00" : NEON }}
+                            >
+                              {d > 0 ? `${d} ${getDaysText(d, t, lang)}` : t("admin.tariffExpired")}
                             </span>
                           </div>
                         );
                       })()}
                     </div>
-                    <div className="flex-shrink-0 text-left sm:text-right">
-                      <p className="text-2xl sm:text-3xl font-bold" style={{ color: 'hsl(var(--primary))' }}>
-                        {company.status === "Пробная"
-                          ? t("common.free")
-                          : currentPlan
-                            ? (currentPlan.price === 0 ? t("common.free") : `${currentPlan.price} ₸`)
-                            : t("common.free")}
-                      </p>
-                    </div>
+
+                    <Separator className="mb-4" />
+
+                    {/* Feature list */}
+                    <ul className="space-y-2 flex-1 mb-5">
+                      {plan.features.map((feature, idx) => (
+                        <li key={idx} className="flex items-start gap-2 text-xs">
+                          <FiCheck
+                            className="mt-0.5 h-3.5 w-3.5 flex-shrink-0"
+                            style={{ color: accent }}
+                          />
+                          <span className="text-muted-foreground leading-snug">
+                            {getTranslatedValue(feature)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    {/* CTA */}
+                    <Button
+                      className="w-full mt-auto text-brutal text-xs tracking-widest font-black"
+                      disabled={isDisabled}
+                      onClick={() => handleUpgrade(plan.id)}
+                      style={
+                        isDisabled
+                          ? { borderRadius: 0, cursor: "not-allowed" }
+                          : {
+                              borderRadius: 0,
+                              backgroundColor: accent,
+                              color: BLACK,
+                              border: `2px solid ${BLACK}`,
+                              boxShadow: `3px 3px 0 ${BLACK}`,
+                            }
+                      }
+                      variant={isDisabled ? "outline" : "default"}
+                    >
+                      {isCurrentPlanExpired
+                        ? t("company.renewPlan")
+                        : isCurrent
+                        ? t("company.currentPlan")
+                        : t("company.selectPlan")}
+                      {!isDisabled && <FiArrowRight className="ml-2 h-3.5 w-3.5" />}
+                    </Button>
                   </div>
                 </div>
-              </Card>
-            )}
-            {/* Available Plans */}
-            <div className="flex-shrink-0 pb-6">
-              <h2 className="text-2xl font-bold text-foreground mb-6">{t("company.availablePlans")}</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 items-stretch">
-              {plans
-                .filter((plan) => {
-                  // Скрываем пробный тариф, если пользователь его уже использовал и сейчас не на нем
-                  const planName = typeof plan.name === "string" ? plan.name : getTranslatedValue(plan.name);
-                  const isCurrent = planName === company?.plan || (typeof plan.name === "object" && (plan.name.ru === company?.plan || plan.name.en === company?.plan || plan.name.kk === company?.plan));
-                  const isFree = plan.price === 0 || plan.isFree === true;
-                  
-                  // Если это пробный тариф и пользователь его уже использовал, но сейчас не на нем - скрываем
-                  if (isFree && company?.trialUsed && !isCurrent) {
-                    return false;
-                  }
-                  return true;
-                })
-                .map((plan) => {
-                const planName = typeof plan.name === "string" ? plan.name : getTranslatedValue(plan.name);
-                const isCurrent = planName === company?.plan || (typeof plan.name === "object" && (plan.name.ru === company?.plan || plan.name.en === company?.plan || plan.name.kk === company?.plan));
-                const isFree = plan.price === 0;
-                const isStandard = plan.id === "standard";
-                const isPro = plan.id === "pro";
-                
-                // Определяем цвета для каждого тарифа
-                let badgeColor = "bg-muted text-muted-foreground";
-                let buttonVariant: "default" | "outline" | "secondary" = "default";
-                
-                if (isFree) {
-                  badgeColor = "bg-muted text-muted-foreground";
-                  buttonVariant = "outline";
-                } else if (isStandard) {
-                  badgeColor = "bg-primary/20 text-primary-foreground";
-                  buttonVariant = "default";
-                } else if (isPro) {
-                  badgeColor = "bg-secondary/20 text-secondary-foreground";
-                  buttonVariant = "default";
-                }
-                
-                const gradientStyle = isFree 
-                  ? { background: 'linear-gradient(to bottom right, hsl(var(--muted) / 0.08), hsl(var(--muted) / 0.03))' }
-                  : isStandard
-                    ? { background: 'linear-gradient(to bottom right, hsl(var(--primary) / 0.08), hsl(var(--primary) / 0.03))' }
-                    : { background: 'linear-gradient(to bottom right, hsl(var(--secondary) / 0.08), hsl(var(--secondary) / 0.03))' };
-                
-                const circleColor = isFree 
-                  ? 'hsl(var(--muted))'
-                  : isStandard
-                    ? 'hsl(var(--primary))'
-                    : 'hsl(var(--secondary))';
-                
-                const textColor = isFree 
-                  ? 'hsl(var(--foreground))'
-                  : isStandard
-                    ? 'hsl(var(--primary))'
-                    : 'hsl(var(--secondary))';
-                
-                return (
-                  <Card
-                    key={plan.id}
-                    className={`p-6 border-border shadow-lg relative overflow-hidden transition-all hover:shadow-xl hover:scale-[1.02] flex flex-col h-full ${
-                      isCurrent ? 'ring-2 ring-primary' : ''
-                    }`}
-                    style={gradientStyle}
-                  >
-                    <div className="absolute top-0 right-0 w-20 h-20 rounded-full -mr-10 -mt-10 opacity-10" style={{ backgroundColor: circleColor }}></div>
-                    <div className="relative z-10 flex flex-col h-full">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-lg font-bold text-foreground">{getTranslatedValue(plan.name)}</h4>
-                          {isFree && !isCurrent && (
-                            <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/20">
-                              {t("common.free")}
-                            </Badge>
-                          )}
-                          {isCurrent && (
-                            <Badge className={`${badgeColor} shadow-sm`}>
-                              <FiCheck className="h-3 w-3 mr-1" />
-                              {t("company.current")}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <div className="mb-4">
-                        {isFree && (plan.freePeriodDays || freePlanSettings?.freePeriodDays) ? (
-                          <div className="flex flex-col">
-                            {/* Для текущего пробного тарифа показываем дни до окончания вместо общего количества дней */}
-                            {isCurrent && company?.trialEndDate ? (() => {
-                              const endDate = new Date(company.trialEndDate);
-                              const now = new Date();
-                              const diffTime = endDate.getTime() - now.getTime();
-                              const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                              return (
-                                <>
-                                  <p className="text-3xl font-bold text-foreground mb-1">
-                                    {diffDays > 0 ? `${diffDays} ${getDaysText(diffDays)}` : t("admin.tariffExpired")}
-                                  </p>
-                                  <p className="text-sm text-muted-foreground">{t("company.trialAccess")}</p>
-                                </>
-                              );
-                            })() : (
-                              <>
-                                <p className="text-3xl font-bold text-foreground mb-1">
-                                  {freePlanSettings?.freePeriodDays ?? plan.freePeriodDays ?? 0} {getDaysText(freePlanSettings?.freePeriodDays ?? plan.freePeriodDays ?? 0)}
-                                </p>
-                                <p className="text-sm text-muted-foreground">{t("company.trialAccess")}</p>
-                              </>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="flex items-baseline gap-1">
-                            <p className="text-3xl font-bold" style={{ color: textColor }}>
-                              {plan.price} ₸
-                            </p>
-                            <span className="text-xs text-muted-foreground">/{t("admin.perMonth")}</span>
-                          </div>
-                        )}
-                        {/* Дни до окончания тарифа - для текущего платного тарифа */}
-                        {isCurrent && !isFree && company?.planEndDate && (() => {
-                          const endDate = new Date(company.planEndDate);
-                          const now = new Date();
-                          const diffTime = endDate.getTime() - now.getTime();
-                          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                          return (
-                            <div className="mt-3 pt-3 border-t border-border/50">
-                              <div className="flex items-center justify-between text-xs">
-                                <span className="text-muted-foreground">{t("admin.daysUntilExpiry")}:</span>
-                                <span className={`font-semibold ${diffDays <= 0 ? "text-destructive" : diffDays <= 5 ? "text-orange-500" : "text-foreground"}`}>
-                                  {diffDays > 0
-                                    ? `${diffDays} ${getDaysText(diffDays)}`
-                                    : t("admin.tariffExpired")
-                                  }
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                      <ul className="space-y-2.5 mb-6 flex-grow">
-                        {plan.features.map((feature, idx) => {
-                          const isFirstFeature = idx === 0 && isFree;
-                          return (
-                            <li key={idx} className={`flex items-start gap-3 ${isFirstFeature ? 'text-base font-semibold' : 'text-sm'} text-foreground`}>
-                              <div className={`mt-0.5 flex-shrink-0 rounded-full ${isFirstFeature ? 'p-1.5' : 'p-1'}`} style={{ backgroundColor: `${circleColor}15` }}>
-                                <FiCheck className={isFirstFeature ? "h-4 w-4" : "h-3.5 w-3.5"} style={{ color: circleColor }} />
-                              </div>
-                              <span className={`leading-relaxed ${isFirstFeature ? 'text-foreground font-semibold' : 'text-muted-foreground'}`}>
-                                {getTranslatedValue(feature)}
-                              </span>
-                            </li>
-                          );
-                        })}
-                      </ul>
-                      {(() => {
-                        // Проверяем, истек ли текущий платный план — разрешаем продление
-                        const isCurrentPlanExpired = isCurrent && !isFree && company?.planEndDate && new Date(company.planEndDate) < new Date();
-                        const isDisabled = isCurrent && !isCurrentPlanExpired;
-                        return (
-                          <Button
-                            className={`w-full mt-auto ${
-                              isDisabled
-                                ? "bg-muted text-muted-foreground hover:bg-muted cursor-not-allowed"
-                                : ""
-                            }`}
-                            variant={isDisabled ? "outline" : buttonVariant}
-                            disabled={isDisabled}
-                            onClick={() => handleUpgrade(plan.id)}
-                            style={!isDisabled && !isFree ? { backgroundColor: circleColor } : {}}
-                          >
-                            {isCurrentPlanExpired
-                              ? t("company.renewPlan")
-                              : isCurrent
-                                ? t("company.currentPlan")
-                                : t("company.selectPlan")}
-                            {!isDisabled && <FiArrowRight className="h-4 w-4 ml-2" />}
-                          </Button>
-                        );
-                      })()}
-                    </div>
-                  </Card>
-                );
-              })}
-              </div>
-            </div>
+              );
+            })}
           </div>
-        </main>
-      </div>
+        </div>
+
+        {/* ── PAYPAL NOTE ── */}
+        <div
+          className="border-2 border-dashed p-4 flex items-center gap-3"
+          style={{ borderColor: "hsl(var(--border))" }}
+        >
+          <FiLock className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+          <p className="text-xs text-muted-foreground">
+            {t("payment.securePayment")}
+          </p>
+        </div>
+      </main>
 
       <PaymentModal
         open={paymentModal.open}
         onOpenChange={(open) => setPaymentModal((prev) => ({ ...prev, open }))}
+        planId={paymentModal.planId}
         planName={paymentModal.planName}
-        planPrice={paymentModal.planPrice}
-        onPaymentSuccess={handlePaymentSuccess}
+        price={paymentModal.planPrice}
+        onSuccess={handlePaymentSuccess}
       />
     </div>
   );
 };
+
 export default CompanyBilling;

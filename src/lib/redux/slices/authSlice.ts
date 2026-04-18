@@ -3,6 +3,7 @@ import type { User, AuthState } from "@/types";
 import { toast } from "sonner";
 import { authService } from "@/lib/api/auth";
 import type { ApiError } from "@/lib/api/client";
+import type { TelegramAuthData } from "@/lib/api/auth";
 import { setToken, getToken, removeToken } from "@/lib/utils/cookies";
 import i18n from "@/i18n/config";
 
@@ -197,6 +198,44 @@ export const checkSessionAsync = createAsyncThunk<
   }
 );
 
+// Async thunk для аутентификации через Telegram
+export const telegramAuthAsync = createAsyncThunk<
+  User,
+  TelegramAuthData,
+  { rejectValue: string }
+>(
+  'auth/telegramAuth',
+  async (telegramData, { rejectWithValue }) => {
+    try {
+      const response = await authService.telegramAuth(telegramData);
+
+      if (!response?.data?.user || !response.data.token) {
+        return rejectWithValue("Некорректный ответ сервера");
+      }
+
+      // Сохраняем токен в куки
+      setToken(response.data.token);
+
+      const user: User = {
+        id: response.data.user.id,
+        email: response.data.user.email,
+        role: response.data.user.role as User['role'],
+        companyId: response.data.user.companyId
+          ? String(response.data.user.companyId)
+          : undefined,
+        name: response.data.user.name,
+        telegramId: telegramData.id,
+        telegramUsername: telegramData.username,
+      };
+
+      return user;
+    } catch (error) {
+      const apiError = error as ApiError;
+      return rejectWithValue(apiError.message || "Ошибка аутентификации через Telegram");
+    }
+  }
+);
+
 const authSlice = createSlice({
   name: "auth",
   initialState,
@@ -366,7 +405,7 @@ const authSlice = createSlice({
       .addCase(checkSessionAsync.rejected, (state, action) => {
         // Проверяем, является ли ошибка блокировкой компании
         const errorMessage = String(action.payload || action.error?.message || "").trim();
-        if (errorMessage.includes("COMPANY_BLOCKED") || 
+        if (errorMessage.includes("COMPANY_BLOCKED") ||
             errorMessage.includes("company blocked")) {
           const num = errorMessage.includes("|") ? errorMessage.split("|")[1]?.trim() : undefined;
           const msg = num ? i18n.t("auth.companyBlockedWhatsAppWithNumber", { number: num }) : i18n.t("auth.companyBlockedWhatsApp");
@@ -375,6 +414,20 @@ const authSlice = createSlice({
         state.user = null;
         state.isAuthenticated = false;
         state.isLoading = false;
+      })
+      // Telegram Auth
+      .addCase(telegramAuthAsync.pending, (state) => {
+        state.isLoading = true;
+      })
+      .addCase(telegramAuthAsync.fulfilled, (state, action) => {
+        state.user = action.payload;
+        state.isAuthenticated = true;
+        state.isLoading = false;
+        toast.success("Вход через Telegram выполнен успешно");
+      })
+      .addCase(telegramAuthAsync.rejected, (state, action) => {
+        state.isLoading = false;
+        toast.error(action.payload as string || "Ошибка аутентификации через Telegram");
       });
   },
 });

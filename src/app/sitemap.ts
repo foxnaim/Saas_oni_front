@@ -1,7 +1,7 @@
 import type { MetadataRoute } from "next";
 import { serverApiClient } from "@/lib/api/server";
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://feedbackhub.com";
+const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://sayless.app";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Статические маршруты

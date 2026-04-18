@@ -1,23 +1,24 @@
-'use client';
-
-import { useRouter } from "next/navigation";
-import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
+import Link from "next/link";
 
 export default function NotFound() {
-  const router = useRouter();
-  const { t } = useTranslation();
-  
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted">
+    <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="text-center">
-        <h1 className="mb-4 text-4xl font-bold">404</h1>
-        <p className="mb-4 text-xl text-muted-foreground">{t("common.pageNotFound")}</p>
-        <Button onClick={() => router.push("/")} variant="outline">
-          {t("common.backToHome")}
-        </Button>
+        <p className="font-mono text-[10rem] font-black leading-none tracking-tighter text-foreground">
+          404
+        </p>
+        <p className="mt-2 font-mono text-xl font-bold uppercase tracking-widest text-foreground">
+          Page Not Found
+        </p>
+        <div className="mt-8">
+          <Link
+            href="/"
+            className="inline-block border-2 border-foreground bg-background px-6 py-3 font-mono font-bold uppercase tracking-wide text-foreground shadow-[4px_4px_0px_0px] shadow-foreground transition-all hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-[2px_2px_0px_0px] hover:shadow-foreground"
+          >
+            Back to home
+          </Link>
+        </div>
       </div>
     </div>
   );
 }
-

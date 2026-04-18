@@ -82,7 +82,7 @@ const ForgotPasswordModal = ({ open, onOpenChange }: ForgotPasswordModalProps) =
             <Link href="/" className="mb-4">
               <Image
                 src="/feedBack.svg"
-                alt="FeedbackHub"
+                alt="Sayless"
                 width={48}
                 height={48}
                 priority

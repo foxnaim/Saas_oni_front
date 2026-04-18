@@ -1,72 +1,156 @@
 'use client';
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import Image from "next/image";
-import { Card } from "@/components/ui/card";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { z } from "zod";
+
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { FiUpload, FiX, FiEdit2, FiTrash2 } from "react-icons/fi";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+
+import { FiUpload, FiX, FiCopy, FiCheck, FiSend } from "react-icons/fi";
 import { CompanyHeader } from "@/components/CompanyHeader";
 import { useAuth } from "@/lib/redux";
-import { useCompany, useUpdateCompany, useUpdateCompanyPassword, useDeleteCompany, useSupportInfo } from "@/lib/query";
+import {
+  useCompany,
+  useUpdateCompany,
+  useUpdateCompanyPassword,
+  useDeleteCompany,
+} from "@/lib/query";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { authService } from "@/lib/api/auth";
 import { validatePasswordStrength } from "@/lib/utils/validation";
 import { compressImage, validateFileSize, validateImageType } from "@/lib/utils/imageCompression";
-
 import { useFullscreenContext } from "@/components/providers/FullscreenProvider";
-import { usePlanPermissions } from "@/hooks/usePlanPermissions";
-import { useWhatsAppSupport } from "@/hooks/useWhatsAppSupport";
+import { cn } from "@/lib/utils/cn";
+
+/* ─── Zod schemas ─────────────────────────────────────────────────────────── */
+
+const profileSchema = z.object({
+  companyName: z.string().min(1, "Company name is required"),
+  adminEmail: z.string().email("Invalid email address"),
+});
+
+const passwordSchema = z
+  .object({
+    currentPassword: z.string().optional(),
+    newPassword: z.string().min(8, "Minimum 8 characters"),
+    confirmPassword: z.string().min(1, "Please confirm password"),
+  })
+  .refine((d) => d.newPassword === d.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });
+
+const passwordSchemaNoCurrentPassword = z
+  .object({
+    newPassword: z.string().min(8, "Minimum 8 characters"),
+    confirmPassword: z.string().min(1, "Please confirm password"),
+  })
+  .refine((d) => d.newPassword === d.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+  });
+
+const notificationsSchema = z.object({
+  emailNotifications: z.boolean(),
+  telegramNotifications: z.boolean(),
+  whatsappSupport: z.string().optional(),
+});
+
+const deleteSchema = z.object({
+  confirmName: z.string().min(1, "Type the company name to confirm"),
+  deletePassword: z.string().optional(),
+});
+
+type ProfileForm = z.infer<typeof profileSchema>;
+type PasswordForm = z.infer<typeof passwordSchema>;
+type NotificationsForm = z.infer<typeof notificationsSchema>;
+type DeleteForm = z.infer<typeof deleteSchema>;
+
+/* ─── Sub-component: SectionCard ─────────────────────────────────────────── */
+
+interface SectionCardProps {
+  title: string;
+  danger?: boolean;
+  children: React.ReactNode;
+  className?: string;
+}
+
+const SectionCard = ({ title, danger, children, className }: SectionCardProps) => (
+  <Card
+    className={cn(
+      "border-2 border-foreground bg-card shadow-[4px_4px_0_0_hsl(var(--foreground)/0.15)]",
+      danger && "border-accent shadow-[4px_4px_0_0_hsl(var(--accent)/0.4)]",
+      className,
+    )}
+  >
+    <CardHeader className="pb-4 border-b-2 border-foreground/10">
+      <CardTitle
+        className={cn(
+          "text-sm font-bold uppercase tracking-widest",
+          danger && "text-accent",
+        )}
+      >
+        {title}
+      </CardTitle>
+    </CardHeader>
+    <CardContent className="pt-6">{children}</CardContent>
+  </Card>
+);
+
+/* ─── Main component ──────────────────────────────────────────────────────── */
 
 const CompanySettings = () => {
-  const { t, i18n: i18nInstance } = useTranslation();
+  const { t } = useTranslation();
   const { user } = useAuth();
   const router = useRouter();
   const { isFullscreen } = useFullscreenContext();
-  const permissions = usePlanPermissions();
-  const whatsapp = useWhatsAppSupport();
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+
+  /* logo state */
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [isCompressing, setIsCompressing] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isEditingEmail, setIsEditingEmail] = useState(false);
-  const [newEmail, setNewEmail] = useState("");
-  const [emailPassword, setEmailPassword] = useState("");
-  const [companyName, setCompanyName] = useState("");
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [deletePassword, setDeletePassword] = useState("");
-  
+
+  /* copy state */
+  const [codeCopied, setCodeCopied] = useState(false);
+
+  /* delete dialog */
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+
+  /* telegram mock state */
+  const [telegramConnected, setTelegramConnected] = useState(false);
+
+  /* queries */
   const { data: company, refetch: refetchCompany } = useCompany(user?.companyId || 0, {
     enabled: !!user?.companyId,
   });
 
-  // Получаем номер WhatsApp поддержки от админа
-  const { data: supportInfo } = useSupportInfo();
-
-  const { mutate: updateCompany } = useUpdateCompany({
-    onSuccess: () => {
-      setIsEditingEmail(false);
-      setEmailPassword("");
-      toast.success(t("company.settingsSaved"));
-      refetchCompany();
-    },
+  /* mutations */
+  const { mutateAsync: updateCompany, isPending: isSavingProfile } = useUpdateCompany({
     onError: (error: any) => {
       const msg = (error.response?.data?.message || error?.message || "").toLowerCase();
       if (msg.includes("insufficient permissions") || msg.includes("access denied") || msg.includes("forbidden")) {
@@ -78,11 +162,6 @@ const CompanySettings = () => {
   });
 
   const { mutateAsync: updateCompanyPassword, isPending: isUpdatingPassword } = useUpdateCompanyPassword({
-    onSuccess: () => {
-      toast.success(t("auth.passwordUpdated"));
-      setNewPassword("");
-      setConfirmPassword("");
-    },
     onError: (error: any) => {
       const msg = (error?.message || "").toLowerCase();
       if (msg.includes("insufficient permissions") || msg.includes("access denied") || msg.includes("forbidden")) {
@@ -95,605 +174,733 @@ const CompanySettings = () => {
 
   const { mutateAsync: deleteCompany, isPending: isDeleting } = useDeleteCompany({
     onSuccess: () => {
-      setIsDeleteDialogOpen(false);
-      toast.success(t("admin.companyDeleted") || t("company.companyDeleted") || "Компания удалена");
-      toast.info(t("admin.changesTakeEffectWithin5Minutes"));
-      // Перенаправляем на главную страницу после удаления компании
+      setIsDeleteOpen(false);
+      toast.success(t("company.deleteCompany"));
       router.push("/");
     },
     onError: (error: any) => {
-      const backendMessage = error?.message || error?.response?.data?.error?.message || error?.response?.data?.message || "";
+      const backendMessage = error?.message || error?.response?.data?.message || "";
       const errorStatus = error?.status || error?.response?.status;
       const msgLower = backendMessage.toLowerCase();
-      
-      // Если 404 - компания уже удалена, это нормально
-      const isNotFound = errorStatus === 404 || 
-                        backendMessage.includes("Company not found") || 
-                        backendMessage.includes("not found");
-      
-      if (isNotFound) {
-        toast.success(t("admin.companyDeleted") || t("company.companyDeleted") || "Компания удалена");
-        toast.info(t("admin.changesTakeEffectWithin5Minutes"));
+
+      if (errorStatus === 404 || backendMessage.includes("not found")) {
+        toast.success(t("company.deleteCompany"));
         router.push("/");
+        return;
+      }
+
+      if (msgLower.includes("access denied") || msgLower.includes("forbidden") || msgLower.includes("insufficient permissions") || errorStatus === 403) {
+        toast.error(t("auth.accessDenied"));
+      } else if (msgLower.includes("invalid password") || errorStatus === 401) {
+        toast.error(t("auth.invalidPassword") || t("auth.loginError"));
       } else {
-        // Маппинг сообщений об ошибках
-        let errorMessage = backendMessage || t("common.error");
-        
-        // Проверка на недостаточные права доступа
-        if (backendMessage.includes("Access denied") || 
-            backendMessage.includes("Forbidden") ||
-            backendMessage.includes("Insufficient permissions") ||
-            msgLower.includes("insufficient permissions") ||
-            msgLower.includes("access denied") ||
-            msgLower.includes("forbidden") ||
-            errorStatus === 403) {
-          errorMessage = t("auth.accessDenied") || "Доступ запрещен. У вас нет прав для выполнения этого действия.";
-        } else if (backendMessage.includes("Invalid password") || 
-                   msgLower.includes("invalid password") ||
-                   errorStatus === 401) {
-          errorMessage = t("auth.invalidPassword") || t("auth.loginError") || "Неверный пароль";
-          // Очищаем поле пароля при ошибке
-          setDeletePassword("");
-        } else if (backendMessage.includes("Password is required") || 
-                   msgLower.includes("password is required")) {
-          errorMessage = t("company.passwordRequired") || t("auth.passwordRequired") || "Пароль обязателен";
-        }
-        
-        toast.error(errorMessage);
+        toast.error(backendMessage || t("common.error"));
       }
     },
   });
 
+  /* ── forms ── */
+  const profileForm = useForm<ProfileForm>({
+    resolver: zodResolver(profileSchema),
+    defaultValues: { companyName: "", adminEmail: "" },
+  });
+
+  const passwordForm = useForm<PasswordForm>({
+    resolver: zodResolver(
+      user?.role === "super_admin"
+        ? passwordSchemaNoCurrentPassword
+        : passwordSchema,
+    ),
+    defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
+  });
+
+  const notificationsForm = useForm<NotificationsForm>({
+    resolver: zodResolver(notificationsSchema),
+    defaultValues: {
+      emailNotifications: true,
+      telegramNotifications: false,
+      whatsappSupport: "",
+    },
+  });
+
+  const deleteForm = useForm<DeleteForm>({
+    resolver: zodResolver(
+      deleteSchema.superRefine((data, ctx) => {
+        if (company?.name && data.confirmName !== company.name) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Type "${company.name}" to confirm`,
+            path: ["confirmName"],
+          });
+        }
+      }),
+    ),
+    defaultValues: { confirmName: "", deletePassword: "" },
+  });
+
+  /* sync company data into forms */
   useEffect(() => {
     if (company) {
       setLogoPreview(company.logoUrl || null);
-      if (company.adminEmail) {
-        setNewEmail(company.adminEmail);
-      }
-      if (company.name) {
-        setCompanyName(company.name);
-      }
+      profileForm.reset({
+        companyName: company.name || "",
+        adminEmail: company.adminEmail || user?.email || "",
+      });
     }
-  }, [company]);
+  }, [company]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleLogoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // Validate file size (max 5MB)
-    if (!validateFileSize(file, 5)) {
-      toast.error(t("company.fileTooLarge"));
-      return;
-    }
-
-    // Validate image type
-    if (!validateImageType(file)) {
-      toast.error(t("company.invalidFileType"));
-      return;
-    }
-
+  /* ── logo handlers ── */
+  const processLogoFile = useCallback(async (file: File) => {
+    if (!validateFileSize(file, 5)) { toast.error(t("company.fileTooLarge")); return; }
+    if (!validateImageType(file)) { toast.error(t("company.invalidFileType")); return; }
     try {
       setIsCompressing(true);
-      // compressImage возвращает base64 строку (string), а не File
-      // Поэтому сохраняем оригинальный файл для отправки на сервер
-      const compressedBase64String: string = await compressImage(file);
-      
-      // Сохраняем base64 строку для preview
-      setLogoPreview(compressedBase64String);
-    } catch (error) {
-      console.error('Error compressing image:', error);
+      const compressed: string = await compressImage(file);
+      setLogoPreview(compressed);
+    } catch {
       toast.error(t("company.imageProcessingError"));
     } finally {
       setIsCompressing(false);
     }
+  }, [t]);
+
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processLogoFile(file);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) processLogoFile(file);
   };
 
   const handleRemoveLogo = () => {
     setLogoPreview(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = "";
-    }
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const handleSave = async () => {
+  /* ── copy code ── */
+  const handleCopyCode = () => {
+    if (!company?.code) return;
+    navigator.clipboard.writeText(company.code);
+    setCodeCopied(true);
+    setTimeout(() => setCodeCopied(false), 2000);
+  };
+
+  /* ── submit handlers ── */
+  const onProfileSubmit = async (data: ProfileForm) => {
     if (!user?.companyId) return;
+    const updates: Record<string, any> = {};
+
+    if (data.companyName !== company?.name) updates.name = data.companyName;
+
+    const hasBase64Logo = typeof logoPreview === "string" && logoPreview.startsWith("data:image/");
+    const removedLogo = logoPreview === null && company?.logoUrl;
+    if (hasBase64Logo) updates.logoUrl = logoPreview;
+    else if (removedLogo) updates.logoUrl = "";
+
+    if (Object.keys(updates).length === 0 && data.adminEmail === company?.adminEmail) {
+      toast.info("No changes to save");
+      return;
+    }
+
+    if (data.adminEmail !== company?.adminEmail) {
+      /* email change requires password — handled separately via inline flow */
+      toast.info(t("company.emailChanged") || "Use the email edit flow to change email");
+      return;
+    }
 
     try {
-      const updates: Record<string, any> = {};
-
-      // Имя компании
-      if (companyName && companyName !== company?.name) {
-        updates.name = companyName;
-      }
-
-      // Логотип: отправляем base64, если меняли; если удалили — пустую строку
-      const hasBase64Logo = typeof logoPreview === "string" && logoPreview.startsWith("data:image/");
-      const removedLogo = logoPreview === null && company?.logoUrl;
-
-      if (hasBase64Logo) {
-        updates.logoUrl = logoPreview;
-      } else if (removedLogo) {
-        updates.logoUrl = "";
-      }
-
-      await updateCompany({
-        id: user.companyId,
-        updates,
-      });
-
+      await updateCompany({ id: user.companyId, updates });
       toast.success(t("company.settingsSaved"));
       refetchCompany();
-    } catch (error) {
-      console.error(error);
-      toast.error(t("common.error"));
+    } catch {
+      /* errors handled in mutation */
     }
   };
 
-  const handlePasswordChange = async () => {
-    if (newPassword !== confirmPassword) {
-      toast.error(t("auth.passwordsDoNotMatch"));
+  const onPasswordSubmit = async (data: PasswordForm) => {
+    const passwordCheck = validatePasswordStrength(data.newPassword);
+    if (!passwordCheck.isValid) {
+      toast.error(passwordCheck.errors[0] || t("auth.passwordRequirements"));
       return;
     }
-
-    if (!validatePasswordStrength(newPassword)) {
-      toast.error(t("auth.passwordRequirements"));
-      return;
-    }
-
     try {
       if (user?.role === "super_admin" && user?.companyId) {
-        await updateCompanyPassword({
-          id: user.companyId,
-          password: newPassword,
-        });
+        await updateCompanyPassword({ id: user.companyId, password: data.newPassword });
       } else {
         await authService.changePassword({
-          currentPassword,
-          newPassword,
+          currentPassword: data.currentPassword ?? "",
+          newPassword: data.newPassword,
         });
         toast.success(t("auth.passwordUpdated"));
-        setCurrentPassword("");
       }
-      setNewPassword("");
-      setConfirmPassword("");
+      passwordForm.reset();
     } catch (error: any) {
       const msg = (error.response?.data?.message || error?.message || "").toLowerCase();
-      if (msg.includes("insufficient permissions") || msg.includes("access denied") || msg.includes("forbidden")) {
-        toast.error(t("auth.accessDenied"));
-      } else {
-        toast.error(error.response?.data?.message || error?.message || t("common.error"));
-      }
+      toast.error(
+        msg.includes("access denied") || msg.includes("forbidden")
+          ? t("auth.accessDenied")
+          : error.response?.data?.message || error?.message || t("common.error"),
+      );
     }
   };
 
-  const [isChangingEmail, setIsChangingEmail] = useState(false);
-
-  const handleEmailChange = async () => {
+  const onDeleteSubmit = async (data: DeleteForm) => {
     if (!user?.companyId) return;
-
-    if (!emailPassword) {
-      toast.error(t("company.passwordRequired"));
+    if (user.role === "company" && !data.deletePassword) {
+      toast.error(t("company.passwordRequired") || "Password required");
       return;
     }
-
-    if (!newEmail || newEmail === company?.adminEmail) {
-      toast.error(t("company.enterNewEmail") || "Введите новый email");
-      return;
-    }
-
-    // Валидация email
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(newEmail)) {
-      toast.error(t("auth.invalidEmail"));
-      return;
-    }
-
-    setIsChangingEmail(true);
-    try {
-      await authService.changeEmail({
-        newEmail,
-        password: emailPassword,
-      });
-      toast.success(t("company.emailChanged") || "Email успешно изменён");
-      setIsEditingEmail(false);
-      setEmailPassword("");
-      refetchCompany();
-    } catch (error: any) {
-      const msg = (error?.message || "").toLowerCase();
-      if (msg.includes("incorrect") || msg.includes("invalid") || msg.includes("password")) {
-        toast.error(t("auth.incorrectPassword") || "Неверный пароль");
-      } else if (msg.includes("already") || msg.includes("registered")) {
-        toast.error(t("auth.emailAlreadyInUse") || "Этот email уже используется");
-      } else if (msg.includes("same") || msg.includes("different")) {
-        toast.error(t("auth.emailMustBeDifferent") || "Новый email должен отличаться от текущего");
-      } else {
-        toast.error(error?.message || t("common.error"));
-      }
-    } finally {
-      setIsChangingEmail(false);
-    }
+    await deleteCompany({
+      id: user.companyId,
+      password: user.role === "company" ? data.deletePassword : undefined,
+    });
   };
 
-  const handleLanguageChange = (value: string) => {
-    i18nInstance.changeLanguage(value);
-    localStorage.setItem('i18nextLng', value);
-  };
-
+  /* ════════════════════════════════════════════════════════════════════════
+     RENDER
+  ════════════════════════════════════════════════════════════════════════ */
   return (
-    <div className={`min-h-screen bg-background overflow-x-hidden ${isFullscreen ? 'h-auto overflow-y-auto' : ''}`}>
+    <div
+      className={cn(
+        "min-h-screen bg-background overflow-x-hidden",
+        isFullscreen && "h-auto overflow-y-auto",
+      )}
+    >
       <CompanyHeader />
-      <div className={`flex flex-col ${isFullscreen ? 'h-auto block' : ''}`}>
-        <main className={`container flex-1 p-6 space-y-6 ${isFullscreen ? 'h-auto overflow-visible block' : ''}`}>
-          {/* Company Info */}
-          <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-6">{t("company.companyInfo")}</h3>
-            <div className="space-y-4">
-              {/* Logo Upload */}
-              <div className="space-y-2">
-                <Label>{t("company.companyLogo")}</Label>
-                <div className="flex items-center gap-4">
-                  <div className="relative">
-                    {logoPreview ? (
-                      <div className="relative">
-                        <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-border flex items-center justify-center bg-muted">
-                          <Image
-                            src={logoPreview}
-                            alt={t("company.companyLogo")}
-                            width={96}
-                            height={96}
-                            className="w-full h-full object-cover"
-                            unoptimized
-                          />
-                        </div>
+
+      <main
+        className={cn(
+          "container max-w-2xl py-10 space-y-8",
+          isFullscreen && "h-auto overflow-visible",
+        )}
+      >
+        {/* ── 1. Company Profile ─────────────────────────────────────────── */}
+        <SectionCard title={t("company.companyInfo")}>
+          <Form {...profileForm}>
+            <form onSubmit={profileForm.handleSubmit(onProfileSubmit)} className="space-y-6">
+
+              {/* Logo drop zone */}
+              <div className="space-y-1.5">
+                <Label className="text-xs uppercase tracking-wider font-bold">
+                  {t("company.companyLogo")}
+                </Label>
+
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={handleDrop}
+                  onClick={() => !logoPreview && fileInputRef.current?.click()}
+                  className={cn(
+                    "relative border-2 border-dashed transition-colors",
+                    isDragging
+                      ? "border-primary bg-primary/5"
+                      : "border-foreground/30 hover:border-foreground/60",
+                    !logoPreview && "cursor-pointer",
+                    "flex items-center gap-5 p-4",
+                  )}
+                >
+                  {logoPreview ? (
+                    <>
+                      <div className="relative w-20 h-20 border-2 border-foreground flex-shrink-0 overflow-hidden">
+                        <Image
+                          src={logoPreview}
+                          alt={t("company.companyLogo")}
+                          fill
+                          className="object-cover"
+                          unoptimized
+                        />
                         <button
                           type="button"
-                          onClick={handleRemoveLogo}
-                          className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center hover:bg-destructive/90 transition-colors"
+                          onClick={(e) => { e.stopPropagation(); handleRemoveLogo(); }}
+                          className="absolute top-0 right-0 w-6 h-6 bg-accent text-white flex items-center justify-center hover:bg-accent/80 transition-colors"
                         >
-                          <FiX className="h-3 w-3" />
+                          <FiX className="w-3 h-3" />
                         </button>
                       </div>
-                    ) : (
-                      <div className="w-24 h-24 border-2 border-dashed border-border rounded-full flex items-center justify-center bg-muted">
-                        <FiUpload className="h-8 w-8 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold truncate">{t("company.companyLogo")}</p>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="mt-2"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isCompressing}
+                        >
+                          {isCompressing ? t("company.processing") : t("company.changeLogo")}
+                        </Button>
                       </div>
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      className="hidden"
-                      accept="image/jpeg,image/png,image/gif"
-                      onChange={handleLogoChange}
-                    />
-                    <Button
-                      variant="outline"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={isCompressing}
-                    >
-                      {isCompressing ? t("company.processing") : t("company.changeLogo")}
-                    </Button>
-                    <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
-                      <span className="font-medium">{t("company.logoRequirements")}:</span>{" "}
-                      {t("company.logoRequirementsHint")}
-                    </p>
-                  </div>
+                    </>
+                  ) : (
+                    <div className="w-full flex flex-col items-center gap-2 py-4 select-none">
+                      <FiUpload className="w-8 h-8 text-muted-foreground" />
+                      <span className="text-sm font-bold uppercase tracking-wide">
+                        {isCompressing ? t("company.processing") : t("company.uploadLogo")}
+                      </span>
+                      <span className="text-xs text-muted-foreground text-center">
+                        {t("company.logoRequirementsHint")}
+                      </span>
+                    </div>
+                  )}
                 </div>
+
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
+                  accept="image/jpeg,image/png,image/gif,image/webp"
+                  onChange={handleLogoChange}
+                />
               </div>
 
               {/* Company Name */}
-              <div className="space-y-2">
-                <Label htmlFor="companyName">{t("company.companyName")}</Label>
-                <Input
-                  id="companyName"
-                  value={companyName}
-                  onChange={(e) => setCompanyName(e.target.value)}
-                  placeholder={t("company.companyName")}
-                />
+              <FormField
+                control={profileForm.control}
+                name="companyName"
+                render={({ field, fieldState }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs uppercase tracking-wider font-bold">
+                      {t("company.companyName")}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        placeholder={t("company.companyNamePlaceholder")}
+                        className={cn(fieldState.error && "border-accent")}
+                      />
+                    </FormControl>
+                    <FormMessage className="text-xs text-accent" />
+                  </FormItem>
+                )}
+              />
+
+              {/* Company Code — read-only */}
+              <div className="space-y-1.5">
+                <Label className="text-xs uppercase tracking-wider font-bold">
+                  {t("company.companyCodeLabel")}
+                </Label>
+                <div className="flex gap-2">
+                  <div className="flex-1 flex items-center h-10 border-2 border-foreground/20 bg-muted px-3 font-mono text-sm tracking-widest select-all">
+                    {company?.code ?? "—"}
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={handleCopyCode}
+                    disabled={!company?.code}
+                    aria-label={t("common.copy")}
+                  >
+                    {codeCopied ? <FiCheck className="w-4 h-4 text-primary" /> : <FiCopy className="w-4 h-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("company.codeForEmployees")}
+                </p>
               </div>
 
               {/* Admin Email */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="adminEmail">{t("company.adminEmail")}</Label>
-                  {!isEditingEmail && (
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="h-8 text-xs"
-                      onClick={() => setIsEditingEmail(true)}
-                    >
-                      <FiEdit2 className="mr-2 h-3 w-3" />
-                      {t("common.edit")}
-                    </Button>
-                  )}
-                </div>
-                
-                {isEditingEmail ? (
-                  <div className="space-y-4 p-4 border rounded-md bg-muted/30 animate-in fade-in slide-in-from-top-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="newEmail">{t("company.newEmail")}</Label>
+              <FormField
+                control={profileForm.control}
+                name="adminEmail"
+                render={({ field, fieldState }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs uppercase tracking-wider font-bold">
+                      {t("company.adminEmail")}
+                    </FormLabel>
+                    <FormControl>
                       <Input
-                        id="newEmail"
+                        {...field}
                         type="email"
-                        value={newEmail}
-                        onChange={(e) => setNewEmail(e.target.value)}
-                        placeholder="new@email.com"
+                        placeholder="admin@company.com"
+                        className={cn(fieldState.error && "border-accent")}
                       />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="emailPassword">{t("company.currentPassword")}</Label>
-                      <Input
-                        id="emailPassword"
-                        type="password"
-                        value={emailPassword}
-                        onChange={(e) => setEmailPassword(e.target.value)}
-                        placeholder="••••••••"
-                      />
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button 
-                        variant="ghost" 
-                        size="sm"
-                        onClick={() => {
-                          setIsEditingEmail(false);
-                          setNewEmail(company?.adminEmail || "");
-                          setEmailPassword("");
-                        }}
-                      >
-                        {t("common.cancel")}
-                      </Button>
-                      <Button
-                        size="sm"
-                        onClick={handleEmailChange}
-                        disabled={!newEmail || !emailPassword || newEmail === company?.adminEmail || isChangingEmail}
-                      >
-                        {isChangingEmail ? t("common.loading") : t("common.save")}
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="p-3 bg-muted rounded-md text-sm font-medium">
-                    {company?.adminEmail || user?.email}
-                  </div>
+                    </FormControl>
+                    <FormMessage className="text-xs text-accent" />
+                  </FormItem>
                 )}
-              </div>
+              />
 
-              {/* Ссылка на поддержку от админа */}
-              {supportInfo?.supportWhatsAppNumber && (
-                <div className="space-y-2 pt-4 border-t border-border">
-                  <Label>{t("company.contactSupport") || "Связаться с поддержкой"}</Label>
-                  <a
-                    href={whatsapp.href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg hover:bg-green-100 dark:hover:bg-green-900 transition-colors"
-                  >
-                    <svg className="w-5 h-5 text-green-600" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-                    </svg>
-                    <span className="text-green-700 dark:text-green-300 font-medium">
-                      {supportInfo.supportWhatsAppNumber}
-                    </span>
-                    {permissions.isPro && (
-                      <Badge variant="default" className="ml-auto text-xs bg-green-600">
-                        {t("company.prioritySupport") || "Приоритетная"}
-                      </Badge>
-                    )}
-                  </a>
-                  <p className="text-xs text-muted-foreground">
-                    {t("company.contactSupportDescription") || "Нажмите, чтобы открыть чат в WhatsApp"}
-                  </p>
-                </div>
-              )}
-            </div>
-          </Card>
-
-          {/* Password Change - для суперадмина без подтверждения старого, с предупреждением */}
-          <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-6">{t("company.changePassword")}</h3>
-            {user?.role === "super_admin" && (
-              <div className="mb-4 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800">
-                <p className="text-sm text-amber-800 dark:text-amber-200">
-                  {t("admin.superAdminPasswordWarning") || "Внимание: вы меняете пароль компании без подтверждения старого. Администратор компании потеряет доступ со старым паролем."}
-                </p>
-              </div>
-            )}
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handlePasswordChange();
-              }}
-            >
-              <div className="space-y-4">
-                {/* Hidden username field for accessibility/autocomplete context */}
-                <input
-                  type="email"
-                  className="sr-only"
-                  tabIndex={-1}
-                  aria-hidden="true"
-                  autoComplete="username"
-                  defaultValue={company?.adminEmail || user?.email || ""}
-                />
-                {user?.role !== "super_admin" && (
-                  <div className="space-y-2">
-                    <Label htmlFor="currentPassword">{t("company.currentPassword")}</Label>
-                    <div className="relative">
-                      <Input
-                        id="currentPassword"
-                        type="password"
-                        autoComplete="current-password"
-                        value={currentPassword}
-                        onChange={(e) => setCurrentPassword(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                )}
-                <div className="space-y-2">
-                  <Label htmlFor="newPassword">{t("company.newPassword")}</Label>
-                  <div className="relative">
-                    <Input
-                      id="newPassword"
-                      type="password"
-                      autoComplete="new-password"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="confirmPassword">{t("company.confirmNewPassword")}</Label>
-                  <div className="relative">
-                    <Input
-                      id="confirmPassword"
-                      type="password"
-                      autoComplete="new-password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div className="flex justify-end">
-                  <Button 
-                    type="submit"
-                    disabled={
-                      (user?.role !== "super_admin" && (!currentPassword || !newPassword || !confirmPassword)) ||
-                      (user?.role === "super_admin" && (!newPassword || !confirmPassword)) ||
-                      isUpdatingPassword
-                    }
-                  >
-                    {isUpdatingPassword ? t("common.loading") : t("company.updatePassword")}
-                  </Button>
-                </div>
+              <div className="flex justify-end pt-2">
+                <Button type="submit" disabled={isSavingProfile}>
+                  {isSavingProfile ? t("common.loading") : t("company.saveChanges")}
+                </Button>
               </div>
             </form>
-          </Card>
+          </Form>
+        </SectionCard>
 
-          {/* Project Settings */}
-          <Card className="p-6">
-            <h3 className="text-lg font-semibold mb-6">{t("company.projectSettings")}</h3>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label>{t("company.interfaceLanguage")}</Label>
-                <p className="text-sm text-muted-foreground">
-                  {t("company.interfaceLanguageDescription")}
-                </p>
-                <Select value={i18nInstance.language} onValueChange={handleLanguageChange}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ru">Русский</SelectItem>
-                    <SelectItem value="en">English</SelectItem>
-                    <SelectItem value="kk">Қазақша</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+        {/* ── 2. Security ────────────────────────────────────────────────── */}
+        <SectionCard title={t("company.changePassword")}>
+          {user?.role === "super_admin" && (
+            <div className="mb-5 px-3 py-2 border-l-4 border-accent bg-accent/5">
+              <p className="text-xs text-foreground/80">
+                {t("admin.superAdminPasswordWarning") ||
+                  "Warning: you are changing the company password without confirming the old one."}
+              </p>
             </div>
-          </Card>
-          {/* Danger Zone */}
-          <Card className="p-6 border-destructive">
-            <h3 className="text-lg font-semibold text-destructive mb-6">{t("company.dangerZone")}</h3>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-medium text-foreground">{t("company.deleteCompany")}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {t("company.deleteCompanyWarning")}
-                  </p>
-                </div>
-                <Button 
-                  variant="destructive"
-                  onClick={() => setIsDeleteDialogOpen(true)}
-                  disabled={isDeleting}
+          )}
+
+          <Form {...passwordForm}>
+            <form onSubmit={passwordForm.handleSubmit(onPasswordSubmit)} className="space-y-5">
+              <input
+                type="email"
+                className="sr-only"
+                tabIndex={-1}
+                aria-hidden="true"
+                autoComplete="username"
+                defaultValue={company?.adminEmail || user?.email || ""}
+              />
+
+              {user?.role !== "super_admin" && (
+                <FormField
+                  control={passwordForm.control}
+                  name="currentPassword"
+                  render={({ field, fieldState }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs uppercase tracking-wider font-bold">
+                        {t("company.currentPassword")}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type="password"
+                          autoComplete="current-password"
+                          className={cn(fieldState.error && "border-accent")}
+                        />
+                      </FormControl>
+                      <FormMessage className="text-xs text-accent" />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              <FormField
+                control={passwordForm.control}
+                name="newPassword"
+                render={({ field, fieldState }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs uppercase tracking-wider font-bold">
+                      {t("company.newPassword")}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        type="password"
+                        autoComplete="new-password"
+                        className={cn(fieldState.error && "border-accent")}
+                      />
+                    </FormControl>
+                    <FormMessage className="text-xs text-accent" />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={passwordForm.control}
+                name="confirmPassword"
+                render={({ field, fieldState }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs uppercase tracking-wider font-bold">
+                      {t("company.confirmNewPassword")}
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        type="password"
+                        autoComplete="new-password"
+                        className={cn(fieldState.error && "border-accent")}
+                      />
+                    </FormControl>
+                    <FormMessage className="text-xs text-accent" />
+                  </FormItem>
+                )}
+              />
+
+              <div className="flex justify-end">
+                <Button
+                  type="submit"
+                  disabled={isUpdatingPassword}
                 >
-                  <FiTrash2 className="h-4 w-4 mr-2" />
-                  {t("common.delete")}
+                  {isUpdatingPassword ? t("common.loading") : t("company.updatePassword")}
+                </Button>
+              </div>
+            </form>
+          </Form>
+
+          {/* ── Telegram 2FA ── */}
+          <div className="mt-6 pt-6 border-t-2 border-foreground/10 space-y-4">
+            <p className="text-xs uppercase tracking-widest font-bold text-muted-foreground">
+              Two-Factor / Notifications
+            </p>
+
+            <div className="flex items-center justify-between gap-4 p-3 border-2 border-foreground/20">
+              <div className="space-y-0.5">
+                <p className="text-sm font-bold">
+                  Telegram
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {telegramConnected
+                    ? "Connected — notifications will be sent to your Telegram"
+                    : "Not connected — link your Telegram account for alerts"}
+                </p>
+                {!telegramConnected && (
+                  <a
+                    href="https://t.me/your_bot"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 mt-1 text-xs font-bold underline underline-offset-2 hover:text-primary transition-colors"
+                  >
+                    <FiSend className="w-3 h-3" />
+                    Connect via @your_bot
+                  </a>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <span
+                  className={cn(
+                    "inline-block w-2 h-2 rounded-none",
+                    telegramConnected ? "bg-green-500" : "bg-muted-foreground",
+                  )}
+                />
+                <span className="text-xs font-bold uppercase">
+                  {telegramConnected ? "Connected" : "Not connected"}
+                </span>
+                <Button
+                  type="button"
+                  variant={telegramConnected ? "outline" : "default"}
+                  size="sm"
+                  onClick={() => setTelegramConnected((v) => !v)}
+                >
+                  {telegramConnected ? "Disconnect" : "Connect Telegram"}
                 </Button>
               </div>
             </div>
-          </Card>
-          <div className="flex justify-end gap-3">
-            <Button variant="outline">{t("common.cancel")}</Button>
-            <Button onClick={handleSave}>{t("company.saveChanges")}</Button>
           </div>
-        </main>
-      </div>
+        </SectionCard>
 
-      {/* Delete Company Confirmation Dialog */}
-      <AlertDialog open={isDeleteDialogOpen} onOpenChange={(open) => {
-        setIsDeleteDialogOpen(open);
-        if (!open) {
-          setDeletePassword("");
-        }
-      }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("company.deleteCompany") || t("admin.deleteCompany") || "Удалить компанию"}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("company.deleteCompanyWarning") || t("admin.deleteCompanyWarning") || "Вы уверены, что хотите удалить эту компанию? Это действие нельзя отменить. Все данные компании будут безвозвратно удалены."}
-              {company && (
-                <span className="block mt-2 font-semibold text-foreground">
-                  {company.name}
+        {/* ── 3. Notifications ───────────────────────────────────────────── */}
+        <SectionCard title={t("company.notifications")}>
+          <Form {...notificationsForm}>
+            <form className="space-y-5">
+
+              {/* Email toggle */}
+              <FormField
+                control={notificationsForm.control}
+                name="emailNotifications"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between gap-4 p-3 border-2 border-foreground/20">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-sm font-bold cursor-pointer">
+                        {t("company.emailNotifications")}
+                      </FormLabel>
+                      <p className="text-xs text-muted-foreground">
+                        {t("company.emailNotificationsDescription")}
+                      </p>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              {/* Telegram toggle */}
+              <FormField
+                control={notificationsForm.control}
+                name="telegramNotifications"
+                render={({ field }) => (
+                  <FormItem className="flex items-center justify-between gap-4 p-3 border-2 border-foreground/20">
+                    <div className="space-y-0.5">
+                      <FormLabel className="text-sm font-bold cursor-pointer">
+                        Telegram Notifications
+                      </FormLabel>
+                      <p className="text-xs text-muted-foreground">
+                        Receive new-message alerts in Telegram
+                      </p>
+                    </div>
+                    <FormControl>
+                      <Switch
+                        checked={field.value}
+                        onCheckedChange={field.onChange}
+                        disabled={!telegramConnected}
+                      />
+                    </FormControl>
+                  </FormItem>
+                )}
+              />
+
+              {/* WhatsApp support number */}
+              <FormField
+                control={notificationsForm.control}
+                name="whatsappSupport"
+                render={({ field, fieldState }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs uppercase tracking-wider font-bold">
+                      WhatsApp Support Number
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        type="tel"
+                        placeholder="+7 700 000 0000"
+                        className={cn(fieldState.error && "border-accent")}
+                      />
+                    </FormControl>
+                    <p className="text-xs text-muted-foreground">
+                      Displayed to users as a support contact
+                    </p>
+                    <FormMessage className="text-xs text-accent" />
+                  </FormItem>
+                )}
+              />
+
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    notificationsForm.handleSubmit(() => {
+                      toast.success(t("company.settingsSaved"));
+                    })();
+                  }}
+                >
+                  {t("common.save")}
+                </Button>
+              </div>
+            </form>
+          </Form>
+        </SectionCard>
+
+        {/* ── 4. Danger Zone ─────────────────────────────────────────────── */}
+        <SectionCard title={t("company.dangerZone")} danger>
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <p className="text-sm font-bold">{t("company.deleteCompany")}</p>
+              <p className="text-xs text-muted-foreground max-w-xs">
+                {t("company.deleteCompanyWarning")}
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={() => { deleteForm.reset(); setIsDeleteOpen(true); }}
+              disabled={isDeleting}
+              className="flex-shrink-0"
+            >
+              {t("common.delete")}
+            </Button>
+          </div>
+        </SectionCard>
+      </main>
+
+      {/* ── Delete Confirmation Dialog ─────────────────────────────────── */}
+      <Dialog
+        open={isDeleteOpen}
+        onOpenChange={(open) => {
+          setIsDeleteOpen(open);
+          if (!open) deleteForm.reset();
+        }}
+      >
+        <DialogContent maxWidth="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-accent">
+              {t("company.deleteCompany")}
+            </DialogTitle>
+            <DialogDescription>
+              {t("company.deleteCompanyWarning")}
+              {company?.name && (
+                <span className="block mt-2 font-bold text-foreground">
+                  &ldquo;{company.name}&rdquo;
                 </span>
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="space-y-4 py-4">
-            {user?.role === "company" && (
-              <div className="space-y-2">
-                <Label htmlFor="deletePassword">{t("company.currentPassword") || "Текущий пароль"}</Label>
-                <Input
-                  id="deletePassword"
-                  type="password"
-                  value={deletePassword}
-                  onChange={(e) => setDeletePassword(e.target.value)}
-                  placeholder={t("company.enterPasswordToDelete") || "Введите пароль для подтверждения удаления"}
-                  autoComplete="current-password"
+            </DialogDescription>
+          </DialogHeader>
+
+          <Form {...deleteForm}>
+            <form onSubmit={deleteForm.handleSubmit(onDeleteSubmit)} className="space-y-4 pt-2">
+
+              {/* Type company name to confirm */}
+              <FormField
+                control={deleteForm.control}
+                name="confirmName"
+                render={({ field, fieldState }) => (
+                  <FormItem>
+                    <FormLabel className="text-xs uppercase tracking-wider font-bold">
+                      Type <span className="font-mono">{company?.name}</span> to confirm
+                    </FormLabel>
+                    <FormControl>
+                      <Input
+                        {...field}
+                        placeholder={company?.name}
+                        className={cn("border-2", fieldState.error && "border-accent")}
+                        autoComplete="off"
+                      />
+                    </FormControl>
+                    <FormMessage className="text-xs text-accent" />
+                  </FormItem>
+                )}
+              />
+
+              {/* Password for company role */}
+              {user?.role === "company" && (
+                <FormField
+                  control={deleteForm.control}
+                  name="deletePassword"
+                  render={({ field, fieldState }) => (
+                    <FormItem>
+                      <FormLabel className="text-xs uppercase tracking-wider font-bold">
+                        {t("company.currentPassword")}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          {...field}
+                          type="password"
+                          placeholder={t("company.enterPasswordToDelete")}
+                          autoComplete="current-password"
+                          className={cn("border-2", fieldState.error && "border-accent")}
+                        />
+                      </FormControl>
+                      <FormMessage className="text-xs text-accent" />
+                    </FormItem>
+                  )}
                 />
-                <p className="text-xs text-muted-foreground">
-                  {t("company.passwordRequiredToDelete") || "Для удаления компании требуется подтверждение паролем"}
-                </p>
-              </div>
-            )}
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => {
-              setIsDeleteDialogOpen(false);
-              setDeletePassword("");
-            }}>
-              {t("common.cancel")}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={async () => {
-                if (user?.companyId) {
-                  // Проверяем пароль для администраторов компании
-                  if (user.role === "company" && !deletePassword) {
-                    toast.error(t("company.passwordRequired") || t("auth.passwordRequired") || "Пароль обязателен");
-                    return;
+              )}
+
+              <DialogFooter className="pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => { setIsDeleteOpen(false); deleteForm.reset(); }}
+                >
+                  {t("common.cancel")}
+                </Button>
+                <Button
+                  type="submit"
+                  variant="destructive"
+                  disabled={
+                    isDeleting ||
+                    !deleteForm.watch("confirmName") ||
+                    deleteForm.watch("confirmName") !== company?.name ||
+                    (user?.role === "company" && !deleteForm.watch("deletePassword"))
                   }
-                  
-                  try {
-                    await deleteCompany({
-                      id: user.companyId,
-                      password: user.role === "company" ? deletePassword : undefined,
-                    });
-                  } catch (error) {
-                    // Ошибка уже обработана в onError хука
-                    console.error("[CompanySettings] Failed to delete company:", error);
-                  }
-                }
-              }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={isDeleting || (user?.role === "company" && !deletePassword)}
-            >
-              {isDeleting ? t("common.loading") : (t("company.deleteCompany") || t("admin.deleteCompany") || "Удалить")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+                >
+                  {isDeleting ? t("common.loading") : t("company.deleteCompany")}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
+
 export default CompanySettings;

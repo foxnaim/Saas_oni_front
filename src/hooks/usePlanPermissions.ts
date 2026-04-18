@@ -24,7 +24,6 @@ export interface PlanPermissions {
  */
 function getPlanId(planName: string, plans: SubscriptionPlan[]): string | null {
   const freePlanNames = [
-    "Пробный",
     "Trial",
     "Бесплатный",
     "Free",

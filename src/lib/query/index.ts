@@ -9,7 +9,7 @@ export * from './types';
 export * from './constants';
 
 // Re-export specific hooks for convenience
-export { usePlans, useFreePlanSettings } from './hooks';
+export { usePlans, useFreePlanSettings, useTelegramAuth, useLinkTelegram } from './hooks';
 
 
 // Re-export services for direct use if needed

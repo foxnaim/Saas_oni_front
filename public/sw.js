@@ -3,9 +3,9 @@
  * Ускоряет загрузку на 50-80% при повторных визитах
  */
 
-const CACHE_NAME = 'feedback-v1';
-const STATIC_CACHE = 'feedback-static-v1';
-const API_CACHE = 'feedback-api-v1';
+const CACHE_NAME = 'sayless-v1';
+const STATIC_CACHE = 'sayless-static-v1';
+const API_CACHE = 'sayless-api-v1';
 
 // Файлы для кэширования при установке
 const STATIC_ASSETS = [

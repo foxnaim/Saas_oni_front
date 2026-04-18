@@ -99,7 +99,7 @@ const ResetPasswordContent = () => {
               <Link href="/" className="inline-block mb-4">
                 <Image
                   src="/feedBack.svg"
-                  alt="Anonymous Chat"
+                  alt="Sayless"
                   width={48}
                   height={48}
                   priority

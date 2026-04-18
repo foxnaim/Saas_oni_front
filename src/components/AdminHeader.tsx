@@ -1,201 +1,189 @@
 'use client';
 
-import Link from "next/link";
-import Image from "next/image";
-import { usePathname } from "next/navigation";
-import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import {
-  FiHome,
-  FiMessageSquare,
-  FiDollarSign,
-  FiBarChart2,
-  FiUsers,
-  FiSettings,
-  FiLogOut,
-  FiMenu,
-  FiX,
-} from "react-icons/fi";
-import { useAuth } from "@/lib/redux";
-import { useNextAuth } from "@/lib/hooks/useNextAuth";
-import { cn } from "@/lib/utils/cn";
-import { motion, AnimatePresence } from "framer-motion";
-import { useState } from "react";
-import { Menu as HeadlessMenu, Transition } from "@headlessui/react";
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useTranslation } from 'react-i18next';
+import { useState } from 'react';
+import { Menu as HeadlessMenu, Transition } from '@headlessui/react';
+import { FiSettings, FiLogOut } from 'react-icons/fi';
+import { useAuth } from '@/lib/redux';
+import { useNextAuth } from '@/lib/hooks/useNextAuth';
+import { useAppDispatch, useAppSelector, toggleTheme } from '@/lib';
+import { cn } from '@/lib/utils/cn';
+import { LanguageSwitcher } from '@/components/LanguageSwitcher';
 
-// Fixed imports to remove unused useEffect
-interface AdminHeaderProps {}
-
-export const AdminHeader = ({}: AdminHeaderProps = {}) => {
+export const AdminHeader = () => {
   const { t } = useTranslation();
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const { signOut: nextAuthSignOut, isAuthenticated: isNextAuthAuthenticated } = useNextAuth();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  
-  // Полноэкранный режим обрабатывается глобально через FullscreenProvider
-  
-  const navigation = [
-    { 
-      name: t("admin.companies"), 
-      path: "/admin", 
-      icon: FiHome,
-    },
-    { name: t("admin.messages"), path: "/admin/messages", icon: FiMessageSquare },
-    { name: t("admin.plans"), path: "/admin/plans", icon: FiDollarSign },
-    { name: t("admin.analytics"), path: "/admin/analytics", icon: FiBarChart2 },
-    { name: t("admin.admins"), path: "/admin/admins", icon: FiUsers },
+  const dispatch = useAppDispatch();
+  const theme = useAppSelector((state) => state.ui.theme);
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const allNavItems = [
+    { key: 'dashboard',  label: t('admin.companies'),  path: '/admin' },
+    { key: 'analytics',  label: t('admin.analytics'),  path: '/admin/analytics' },
+    { key: 'messages',   label: t('admin.messages'),   path: '/admin/messages' },
+    { key: 'companies',  label: t('admin.companies'),  path: '/admin' },
+    { key: 'plans',      label: t('admin.plans'),      path: '/admin/plans' },
+    { key: 'settings',   label: t('common.settings'),  path: '/admin/settings' },
+    { key: 'admins',     label: t('admin.admins'),     path: '/admin/admins', superOnly: true },
   ];
-  const visibleNavigation = user?.role === "super_admin" 
-    ? navigation 
-    : navigation.filter((item) => item.path !== "/admin/admins");
+
+  // Deduplicate: show unique paths; filter super_admin-only if not super_admin
+  const seen = new Set<string>();
+  const navItems = allNavItems.filter((item) => {
+    if (item.superOnly && user?.role !== 'super_admin') return false;
+    if (seen.has(item.path)) return false;
+    seen.add(item.path);
+    return true;
+  });
+
+  const isActive = (path: string) =>
+    path === '/admin'
+      ? pathname === '/admin' || pathname === '/admin/'
+      : pathname === path || pathname.startsWith(path + '/');
+
+  const handleLogout = async () => {
+    try {
+      if (isNextAuthAuthenticated) await nextAuthSignOut();
+      logout();
+      if (typeof window !== 'undefined') {
+        [
+          'next-auth.session-token',
+          '__Secure-next-auth.session-token',
+          'next-auth.csrf-token',
+          '__Host-next-auth.csrf-token',
+          'next-auth.callback-url',
+          '__Secure-next-auth.callback-url',
+        ].forEach((name) => {
+          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
+          document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${window.location.hostname};`;
+        });
+      }
+      setTimeout(() => { window.location.href = '/'; }, 200);
+    } catch {
+      logout();
+      setTimeout(() => { window.location.href = '/'; }, 200);
+    }
+  };
+
+  const userInitial =
+    user?.name?.charAt(0)?.toUpperCase() ||
+    user?.email?.charAt(0)?.toUpperCase() ||
+    'A';
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-border bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60">
-      <div className="container flex h-14 sm:h-16 items-center justify-between px-4 sm:px-6">
-        {/* Logo */}
-        <div className="flex items-center gap-2 sm:gap-4">
+    <header className="sticky top-0 z-40 w-full border-b-2 border-border bg-card">
+      {/* ── Main bar ── */}
+      <div className="flex h-14 items-center justify-between px-4 sm:px-6">
+
+        {/* Left: logo + ADMIN badge */}
+        <div className="flex items-center gap-3">
           <Link
             href="/admin"
-            className="flex items-center gap-2"
-            onClick={() => setMobileMenuOpen(false)}
+            className="flex items-center gap-1 shrink-0"
+            onClick={() => setMobileOpen(false)}
           >
-            <Image
-              src="/feedBack.svg"
-              alt="Anonymous Chat"
-              width={32}
-              height={32}
-              priority
-              className="h-8 w-8 sm:h-9 sm:w-9"
-            />
+            <span
+              className="font-bold text-lg tracking-tight leading-none"
+              style={{ fontFamily: '"Space Grotesk", system-ui, sans-serif' }}
+            >
+              SAYLESS
+              <span className="text-primary">.</span>
+            </span>
           </Link>
+          <span className="hidden sm:inline-block border-2 border-border px-1.5 py-0.5 text-[10px] font-bold tracking-widest uppercase text-muted-foreground font-mono">
+            ADMIN
+          </span>
         </div>
 
-        {/* Desktop Navigation */}
-        <nav className="hidden lg:flex items-center gap-1">
-          {visibleNavigation.map((item, index) => {
-            // Для /admin проверяем точное совпадение или что это корневой путь админки
-            const isActive = item.path === '/admin' 
-              ? pathname === '/admin' || pathname === '/admin/'
-              : pathname === item.path || pathname.startsWith(item.path + '/');
-            const Icon = item.icon;
-            return (
-              <motion.div
-                key={item.path}
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.05 }}
-              >
-                <Link
-                  href={item.path as any}
-                  className={cn(
-                    "flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-colors",
-                    isActive
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )}
-                >
-                  <Icon className="h-4 w-4" />
-                  <span>{item.name}</span>
-                </Link>
-              </motion.div>
-            );
-          })}
+        {/* Center: desktop nav */}
+        <nav className="hidden lg:flex items-center gap-0" aria-label="Admin navigation">
+          {navItems.map((item) => (
+            <Link
+              key={item.path}
+              href={item.path as any}
+              className={cn(
+                'relative px-4 py-4 text-xs font-bold uppercase tracking-widest transition-colors',
+                isActive(item.path)
+                  ? 'text-primary border-b-2 border-primary'
+                  : 'text-muted-foreground hover:text-foreground border-b-2 border-transparent'
+              )}
+            >
+              {item.label}
+            </Link>
+          ))}
         </nav>
 
-        {/* Right Actions */}
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* Profile Avatar with Dropdown Menu */}
+        {/* Right: lang switcher + theme toggle + user menu */}
+        <div className="flex items-center gap-2">
+          {/* Language switcher */}
+          <div className="hidden sm:block">
+            <LanguageSwitcher />
+          </div>
+
+          {/* Theme toggle */}
+          <button
+            onClick={() => dispatch(toggleTheme())}
+            className="h-8 w-8 border-2 border-border flex items-center justify-center text-xs font-bold hover:border-primary hover:text-primary transition-colors"
+            aria-label="Toggle theme"
+            title={theme === 'dark' ? 'Light mode' : 'Dark mode'}
+          >
+            {theme === 'dark' ? '☀' : '●'}
+          </button>
+
+          {/* User menu */}
           <HeadlessMenu as="div" className="relative">
-            {({ open }) => (
+            {() => (
               <>
-                <HeadlessMenu.Button
-                  as="button"
-                  className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-sm sm:text-base hover:bg-primary/20 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                >
-                  {user?.name?.charAt(0) || user?.email?.charAt(0)?.toUpperCase() || "A"}
+                <HeadlessMenu.Button className="h-8 w-8 border-2 border-border bg-primary/10 flex items-center justify-center text-primary text-xs font-bold hover:bg-primary hover:text-black transition-colors focus:outline-none">
+                  {userInitial}
                 </HeadlessMenu.Button>
 
                 <Transition
                   enter="transition ease-out duration-100"
-                  enterFrom="transform opacity-0 scale-95 translate-y-2"
-                  enterTo="transform opacity-100 scale-100 translate-y-0"
+                  enterFrom="opacity-0 translate-y-1"
+                  enterTo="opacity-100 translate-y-0"
                   leave="transition ease-in duration-75"
-                  leaveFrom="transform opacity-100 scale-100 translate-y-0"
-                  leaveTo="transform opacity-0 scale-95 translate-y-2"
+                  leaveFrom="opacity-100 translate-y-0"
+                  leaveTo="opacity-0 translate-y-1"
                 >
-                  <HeadlessMenu.Items className="absolute right-0 mt-2 w-48 origin-top-right rounded-lg bg-white border-2 border-primary shadow-xl ring-1 ring-black ring-opacity-5 focus:outline-none z-[100]">
-                    <div className="p-1">
+                  <HeadlessMenu.Items className="absolute right-0 mt-0.5 w-48 origin-top-right bg-card border-2 border-border shadow-brutal focus:outline-none z-[100]">
+                    {user?.email && (
+                      <div className="px-4 py-2.5 border-b-2 border-border">
+                        <p className="text-[10px] font-mono text-muted-foreground truncate uppercase tracking-widest">
+                          {user.email}
+                        </p>
+                      </div>
+                    )}
+                    <div className="py-1">
                       <HeadlessMenu.Item>
                         {({ active }) => (
                           <Link
-                            href={"/admin/settings" as any}
+                            href={'/admin/settings' as any}
                             className={cn(
-                              "w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-md transition-colors",
-                              active
-                                ? "bg-primary/10 text-primary"
-                                : "text-foreground hover:bg-muted"
+                              'flex items-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-widest transition-colors',
+                              active ? 'bg-primary text-black' : 'text-foreground hover:bg-muted'
                             )}
                           >
-                            <FiSettings className="h-4 w-4 flex-shrink-0" />
-                            <span>{t("common.settings")}</span>
+                            <FiSettings className="h-3.5 w-3.5 shrink-0" />
+                            {t('common.settings')}
                           </Link>
                         )}
                       </HeadlessMenu.Item>
                       <HeadlessMenu.Item>
                         {({ active }) => (
                           <button
-                            onClick={async () => {
-                              try {
-                                // Сначала выходим из NextAuth (если был залогинен через OAuth)
-                                if (isNextAuthAuthenticated) {
-                                  await nextAuthSignOut();
-                                }
-                                
-                                // Затем выходим из Redux (это также удалит токен)
-                                logout();
-                                
-                                // Дополнительно очищаем все куки NextAuth
-                                if (typeof window !== 'undefined') {
-                                  // Удаляем все NextAuth куки
-                                  const nextAuthCookies = [
-                                    'next-auth.session-token',
-                                    '__Secure-next-auth.session-token',
-                                    'next-auth.csrf-token',
-                                    '__Host-next-auth.csrf-token',
-                                    'next-auth.callback-url',
-                                    '__Secure-next-auth.callback-url',
-                                  ];
-                                  
-                                  nextAuthCookies.forEach(cookieName => {
-                                    document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;`;
-                                    document.cookie = `${cookieName}=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/; domain=${window.location.hostname};`;
-                                  });
-                                }
-                                
-                                // Используем window.location для полного сброса состояния
-                                // Задержка, чтобы все успело очиститься
-                                setTimeout(() => {
-                                  window.location.href = "/";
-                                }, 200);
-                              } catch (error) {
-                                console.error('Logout error:', error);
-                                // В случае ошибки все равно делаем редирект
-                                logout();
-                                setTimeout(() => {
-                                  window.location.href = "/";
-                                }, 200);
-                              }
-                            }}
+                            onClick={handleLogout}
                             className={cn(
-                              "w-full flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-md transition-colors",
-                              active
-                                ? "bg-primary/10 text-primary"
-                                : "text-foreground hover:bg-muted"
+                              'w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-widest transition-colors',
+                              active ? 'bg-destructive text-white' : 'text-foreground hover:bg-muted'
                             )}
                           >
-                            <FiLogOut className="h-4 w-4 flex-shrink-0" />
-                            <span>{t("common.logout")}</span>
+                            <FiLogOut className="h-3.5 w-3.5 shrink-0" />
+                            {t('common.logout')}
                           </button>
                         )}
                       </HeadlessMenu.Item>
@@ -205,56 +193,54 @@ export const AdminHeader = ({}: AdminHeaderProps = {}) => {
               </>
             )}
           </HeadlessMenu>
-          
-          {/* Mobile Menu Button */}
-          <Button
-            variant="ghost"
-            size="icon"
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="lg:hidden"
+
+          {/* Mobile hamburger */}
+          <button
+            onClick={() => setMobileOpen((v) => !v)}
+            className="lg:hidden h-11 w-11 border-2 border-border flex flex-col items-center justify-center gap-[5px] hover:border-primary transition-colors"
+            aria-label={mobileOpen ? 'Close menu' : 'Open menu'}
           >
-            {mobileMenuOpen ? <FiX className="h-5 w-5" /> : <FiMenu className="h-5 w-5" />}
-          </Button>
+            {mobileOpen ? (
+              <>
+                <span className="block w-4 h-[3px] bg-current rotate-45 translate-y-[4px]" />
+                <span className="block w-4 h-[3px] bg-current -rotate-45 -translate-y-[4px]" />
+              </>
+            ) : (
+              <>
+                <span className="block w-4 h-[3px] bg-current" />
+                <span className="block w-4 h-[3px] bg-current" />
+                <span className="block w-4 h-[3px] bg-current" />
+              </>
+            )}
+          </button>
         </div>
       </div>
 
-      {/* Mobile Navigation */}
-      <AnimatePresence>
-        {mobileMenuOpen && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="lg:hidden border-t border-border bg-card"
-          >
-            <nav className="container px-4 py-3 space-y-1">
-              {visibleNavigation.map((item) => {
-                // Для /admin проверяем точное совпадение или что это корневой путь админки
-                const isActive = item.path === '/admin' 
-                  ? pathname === '/admin' || pathname === '/admin/'
-                  : pathname === item.path || pathname.startsWith(item.path + '/');
-                const Icon = item.icon;
-                return (
-                  <Link
-                    key={item.path}
-                    href={item.path as any}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={cn(
-                      "flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors",
-                      isActive
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                    )}
-                  >
-                    <Icon className="h-5 w-5" />
-                    <span>{item.name}</span>
-                  </Link>
-                );
-              })}
-            </nav>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* ── Mobile nav ── */}
+      {mobileOpen && (
+        <nav className="lg:hidden border-t-2 border-border bg-card w-full" aria-label="Admin mobile navigation">
+          <div className="flex flex-col py-1">
+            {navItems.map((item) => (
+              <Link
+                key={item.path}
+                href={item.path as any}
+                onClick={() => setMobileOpen(false)}
+                className={cn(
+                  'w-full px-6 py-3.5 min-h-[44px] flex items-center text-xs font-bold uppercase tracking-widest transition-colors border-l-4',
+                  isActive(item.path)
+                    ? 'border-primary text-primary bg-primary/5'
+                    : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
+                )}
+              >
+                {item.label}
+              </Link>
+            ))}
+            <div className="px-6 py-3 border-t-2 border-border mt-1 w-full">
+              <LanguageSwitcher />
+            </div>
+          </div>
+        </nav>
+      )}
     </header>
   );
 };

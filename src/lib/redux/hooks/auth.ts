@@ -3,7 +3,8 @@
  */
 
 import { useAppDispatch, useAppSelector } from '../hooks';
-import { loginAsync, registerAsync, logout, verifyEmailAsync } from '../slices/authSlice';
+import { loginAsync, registerAsync, logout, verifyEmailAsync, telegramAuthAsync } from '../slices/authSlice';
+import type { TelegramAuthData } from '@/lib/api/auth';
 import { useQueryClient } from '@tanstack/react-query';
 
 /**
@@ -101,6 +102,30 @@ export const useAuth = () => {
     }
   };
 
+  const telegramLogin = async (telegramData: TelegramAuthData): Promise<{ success: boolean; user?: any }> => {
+    try {
+      const result = await dispatch(telegramAuthAsync(telegramData));
+      if (telegramAuthAsync.fulfilled.match(result)) {
+        if (typeof window !== 'undefined') {
+          setTimeout(() => {
+            try {
+              const socketModule = require('@/lib/websocket/socket');
+              if (socketModule?.reconnectSocket) {
+                socketModule.reconnectSocket();
+              }
+            } catch {
+              // Игнорируем ошибки, если модуль не загружен
+            }
+          }, 0);
+        }
+        return { success: true, user: result.payload };
+      }
+      return { success: false };
+    } catch {
+      return { success: false };
+    }
+  };
+
   const handleLogout = () => {
     // Очищаем Redux state немедленно (синхронно)
     dispatch(logout());
@@ -148,6 +173,7 @@ export const useAuth = () => {
     login,
     register,
     verifyEmail,
+    telegramLogin,
     logout: handleLogout,
   };
 };

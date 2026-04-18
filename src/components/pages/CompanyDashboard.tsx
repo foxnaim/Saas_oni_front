@@ -3,775 +3,797 @@
 import React from "react";
 import { useTranslation } from "react-i18next";
 import { useRouter } from "next/navigation";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   FiMessageSquare,
-  FiClock,
   FiCheckCircle,
+  FiBarChart2,
+  FiSettings,
   FiArrowRight,
-  FiAward,
-  FiStar,
   FiCopy,
-  FiShare2,
-  FiEye,
-  FiEyeOff,
+  FiAlertTriangle,
+  FiZap,
+  FiCreditCard,
+  FiMessageCircle,
+  FiExternalLink,
+  FiHeadphones,
 } from "react-icons/fi";
 import { CompanyHeader } from "@/components/CompanyHeader";
 import { useAuth } from "@/lib/redux";
-import { useCompany, useCompanyStats, useMessageDistribution, useGroupedAchievements, useGrowthMetrics, usePlans, useSupportInfo } from "@/lib/query";
-import { Progress } from "@/components/ui/progress";
-import { Input } from "@/components/ui/input";
+import {
+  useCompany,
+  useCompanyStats,
+  useMessages,
+  usePlans,
+  useSupportInfo,
+} from "@/lib/query";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { getTranslatedValue } from "@/lib/utils/translations";
 import { useFullscreenContext } from "@/components/providers/FullscreenProvider";
 import { usePlanPermissions } from "@/hooks/usePlanPermissions";
 import { useWhatsAppSupport } from "@/hooks/useWhatsAppSupport";
-import { FiAlertTriangle, FiCreditCard, FiHeadphones, FiMessageCircle, FiExternalLink } from "react-icons/fi";
 
-const CompanyDashboard = () => {
+/* ─────────────────────────────────────────────────────────────────────────────
+   CONSTANTS
+───────────────────────────────────────────────────────────────────────────── */
+
+const NEON = "#CCFF00";
+const NEON_DIM = "hsl(74 100% 50% / 0.15)";
+const SUCCESS = "#00FF88";
+const SUCCESS_DIM = "hsl(151 100% 50% / 0.15)";
+const DANGER = "#FF3D00";
+const DANGER_DIM = "hsl(14 100% 50% / 0.12)";
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   LOADING SKELETON
+───────────────────────────────────────────────────────────────────────────── */
+
+const DashboardSkeleton: React.FC = () => (
+  <div className="space-y-6 w-full">
+    {/* Header skeleton */}
+    <div className="border-2 border-foreground/10 p-6">
+      <Skeleton className="h-8 w-48 mb-2 rounded-none" />
+      <Skeleton className="h-5 w-28 rounded-none" />
+    </div>
+
+    {/* Stats grid skeleton */}
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {[0, 1, 2, 3].map((i) => (
+        <div
+          key={i}
+          className="border-2 border-foreground/10 p-5"
+          style={{ boxShadow: "4px 4px 0 0 hsl(var(--foreground)/0.08)" }}
+        >
+          <Skeleton className="h-4 w-24 mb-3 rounded-none" />
+          <Skeleton className="h-10 w-20 mb-1 rounded-none" />
+          <Skeleton className="h-3 w-16 rounded-none" />
+        </div>
+      ))}
+    </div>
+
+    {/* Actions row skeleton */}
+    <div className="flex flex-wrap gap-3">
+      {[0, 1, 2, 3].map((i) => (
+        <Skeleton key={i} className="h-10 w-36 rounded-none" />
+      ))}
+    </div>
+
+    {/* Plan card skeleton */}
+    <div
+      className="border-2 border-foreground/10 p-6"
+      style={{ boxShadow: "4px 4px 0 0 hsl(var(--foreground)/0.08)" }}
+    >
+      <Skeleton className="h-4 w-20 mb-4 rounded-none" />
+      <Skeleton className="h-8 w-32 mb-3 rounded-none" />
+      <Skeleton className="h-4 w-full mb-2 rounded-none" />
+      <Skeleton className="h-3 w-40 rounded-none" />
+    </div>
+  </div>
+);
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   STAT CARD
+───────────────────────────────────────────────────────────────────────────── */
+
+interface StatCardProps {
+  label: string;
+  value: number | string;
+  icon: React.ReactNode;
+  accentColor?: string;
+  accentBg?: string;
+  indicator?: "neon" | "success" | "danger" | "none";
+  suffix?: string;
+}
+
+const StatCard: React.FC<StatCardProps> = ({
+  label,
+  value,
+  icon,
+  accentColor,
+  accentBg,
+  indicator = "none",
+  suffix,
+}) => (
+  <div
+    className="
+      relative border-2 border-foreground/10 bg-card p-5
+      transition-transform duration-100
+      hover:-translate-x-[2px] hover:-translate-y-[2px]
+      cursor-default
+    "
+    style={{ boxShadow: "4px 4px 0 0 hsl(var(--foreground)/0.1)" }}
+  >
+    {/* indicator dot */}
+    {indicator !== "none" && (
+      <span
+        className="absolute top-3 right-3 h-2 w-2 animate-pulse"
+        style={{
+          backgroundColor:
+            indicator === "neon"
+              ? NEON
+              : indicator === "success"
+              ? SUCCESS
+              : DANGER,
+        }}
+      />
+    )}
+
+    <div className="flex items-start gap-3">
+      <div
+        className="flex-shrink-0 p-2 border border-foreground/10"
+        style={{ backgroundColor: accentBg ?? NEON_DIM }}
+      >
+        <span style={{ color: accentColor ?? NEON }}>{icon}</span>
+      </div>
+      <div className="min-w-0">
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+          {label}
+        </p>
+        <p
+          className="font-mono text-3xl font-bold leading-none tracking-tighter"
+          style={{ color: accentColor ?? NEON }}
+        >
+          {value}
+          {suffix && (
+            <span className="text-lg font-semibold ml-0.5">{suffix}</span>
+          )}
+        </p>
+      </div>
+    </div>
+  </div>
+);
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   ALERT BANNER
+───────────────────────────────────────────────────────────────────────────── */
+
+interface AlertBannerProps {
+  title: string;
+  message: string;
+  variant: "danger" | "warning" | "info";
+  action?: { label: string; onClick: () => void };
+  extra?: React.ReactNode;
+}
+
+const AlertBanner: React.FC<AlertBannerProps> = ({
+  title,
+  message,
+  variant,
+  action,
+  extra,
+}) => {
+  const colors = {
+    danger: { bg: DANGER_DIM, border: DANGER, text: DANGER },
+    warning: { bg: NEON_DIM, border: NEON, text: "hsl(var(--foreground))" },
+    info: { bg: "hsl(var(--muted)/0.5)", border: "hsl(var(--border))", text: "hsl(var(--foreground))" },
+  }[variant];
+
+  return (
+    <div
+      className="border-2 p-5"
+      style={{
+        backgroundColor: colors.bg,
+        borderColor: colors.border,
+        boxShadow: `4px 4px 0 0 ${colors.border}`,
+      }}
+    >
+      <div className="flex items-start gap-3">
+        <div
+          className="flex-shrink-0 p-1.5 border border-foreground/10"
+          style={{ backgroundColor: colors.bg }}
+        >
+          <FiAlertTriangle className="h-4 w-4" style={{ color: colors.text }} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p
+            className="text-sm font-bold uppercase tracking-wide mb-1"
+            style={{ color: colors.text }}
+          >
+            {title}
+          </p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            {message}
+          </p>
+          {extra && <div className="mt-2">{extra}</div>}
+          {action && (
+            <Button
+              onClick={action.onClick}
+              size="sm"
+              className="mt-3"
+            >
+              {action.label}
+              <FiArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   MAIN COMPONENT
+───────────────────────────────────────────────────────────────────────────── */
+
+const CompanyDashboard: React.FC = () => {
   const { isFullscreen } = useFullscreenContext();
   const { t } = useTranslation();
   const router = useRouter();
   const { user } = useAuth();
-  const [copiedCode, setCopiedCode] = React.useState(false);
-  const [copiedLink, setCopiedLink] = React.useState(false);
-  const [copiedPassword, setCopiedPassword] = React.useState(false);
-  const [showSensitiveData, setShowSensitiveData] = React.useState(false);
 
-  const { data: company, isLoading: companyLoading } = useCompany(user?.companyId || 0, {
-    enabled: !!user?.companyId,
-  });
+  /* ── state ── */
+  const [copiedCode, setCopiedCode] = React.useState(false);
+
+  /* ── queries ── */
+  const { data: company, isLoading: companyLoading } = useCompany(
+    user?.companyId || 0,
+    { enabled: !!user?.companyId }
+  );
+
+  const { data: stats, isLoading: statsLoading } = useCompanyStats(
+    user?.companyId || 0,
+    { enabled: !!user?.companyId }
+  );
+
+  const { data: messagesData, isLoading: messagesLoading } = useMessages(
+    company?.code ?? null,
+    1,
+    5,
+    undefined,
+    { enabled: !!company?.code }
+  );
 
   const { data: plans = [], isLoading: plansLoading } = usePlans();
+  const { data: supportInfo } = useSupportInfo();
   const permissions = usePlanPermissions();
+  const whatsapp = useWhatsAppSupport();
 
-  // Проверяем, истек ли тариф
+  /* ── derived ── */
+  const currentPlan = React.useMemo(() => {
+    if (!company?.plan || !plans.length) return null;
+    return (
+      plans.find((p) => {
+        const n = typeof p.name === "string" ? p.name : getTranslatedValue(p.name);
+        return (
+          n === company.plan ||
+          (typeof p.name === "object" &&
+            (p.name.ru === company.plan ||
+              p.name.en === company.plan ||
+              p.name.kk === company.plan))
+        );
+      }) ?? null
+    );
+  }, [company?.plan, plans]);
+
+  const isFreeOrTrial = React.useMemo(
+    () =>
+      currentPlan?.isFree === true ||
+      currentPlan?.price === 0 ||
+      ["Пробный", "Trial", "Бесплатный", "Free", "Сынақ", "Тегін"].includes(
+        company?.plan ?? ""
+      ),
+    [company?.plan, currentPlan]
+  );
+
   const isTrialExpired = React.useMemo(() => {
     if (!company?.trialEndDate) return false;
     try {
-      const endDate = new Date(company.trialEndDate);
-      const now = new Date();
-      return now > endDate;
+      return new Date() > new Date(company.trialEndDate);
     } catch {
       return false;
     }
   }, [company?.trialEndDate]);
 
-  // Находим текущий план компании
-  const currentPlan = React.useMemo(() => {
-    if (!company?.plan || !plans.length) return null;
-    return plans.find((p) => {
-      const planName = typeof p.name === "string" ? p.name : getTranslatedValue(p.name);
-      return planName === company.plan || (typeof p.name === "object" && (p.name.ru === company.plan || p.name.en === company.plan || p.name.kk === company.plan));
-    });
-  }, [company?.plan, plans]);
-
-  // Генерация ежедневного буквенно-цифрового пароля на основе даты (UTC, чтобы совпадало с бэкендом)
-  // Пароль автоматически обновляется каждый день
-  // Используем useState с функцией-инициализатором, чтобы избежать проблем с hydration
-  const getCurrentDate = () => {
-    if (typeof window === 'undefined') return '';
-    const today = new Date();
-    return `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
-  };
-
-  // Обновляем дату каждый день через интервал
-  const [dateKey, setDateKey] = React.useState(() => getCurrentDate());
-  const [mounted, setMounted] = React.useState(false);
-  
-  React.useEffect(() => {
-    // Устанавливаем mounted после монтирования компонента
-    setMounted(true);
-    // Устанавливаем правильную дату после монтирования
-    const initialDate = getCurrentDate();
-    if (initialDate) {
-      setDateKey(initialDate);
+  const isPlanExpired = React.useMemo(() => {
+    if (!company?.planEndDate) return false;
+    try {
+      return new Date() > new Date(company.planEndDate);
+    } catch {
+      return false;
     }
-    
-    // Проверяем изменение даты каждую минуту (для надежности)
-    const interval = setInterval(() => {
-      const today = new Date();
-      const newDate = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
-      if (newDate !== dateKey) {
-        setDateKey(newDate);
-      }
-    }, 60000); // Проверяем каждую минуту
+  }, [company?.planEndDate]);
 
-    return () => clearInterval(interval);
-  }, [dateKey]);
-
-  const dailyPassword = React.useMemo(() => {
-    // Только вычисляем пароль после монтирования, чтобы избежать hydration mismatch
-    if (!mounted || !dateKey) return '';
-    
-    const dateStr = dateKey.replace(/-/g, '');
-    
-    // Создаем seed на основе даты для детерминированной генерации
-    const seed = dateStr.split('').reduce((acc, char) => ((acc << 5) - acc) + char.charCodeAt(0), 0);
-    
-    // Используем seed для создания псевдослучайной последовательности
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let password = '';
-    let currentSeed = Math.abs(seed);
-    
-    // Генерируем пароль используя seed
-    for (let i = 0; i < 10; i++) {
-      currentSeed = (currentSeed * 1103515245 + 12345) & 0x7fffffff;
-      const index = currentSeed % chars.length;
-      password += chars[index];
+  const daysRemaining = React.useMemo(() => {
+    const endDate = company?.trialEndDate ?? company?.planEndDate;
+    if (!endDate) return null;
+    try {
+      const diff = new Date(endDate).getTime() - Date.now();
+      return Math.ceil(diff / (1000 * 60 * 60 * 24));
+    } catch {
+      return null;
     }
-    
-    return password;
-  }, [mounted, dateKey]);
+  }, [company?.trialEndDate, company?.planEndDate]);
 
-  // Ссылка для отправки сообщений
-  const shareLink = React.useMemo(() => {
-    if (typeof window === 'undefined' || !company?.code) return '';
-    return `${window.location.origin}/?code=${company.code}`;
-  }, [company?.code]);
+  const messagesUsedPct = React.useMemo(() => {
+    const used = company?.messagesThisMonth ?? 0;
+    const limit = currentPlan?.messagesLimit ?? company?.messagesLimit ?? 0;
+    if (!limit) return 0;
+    return Math.min(100, Math.round((used / limit) * 100));
+  }, [company, currentPlan]);
 
-  const { data: stats, isLoading: statsLoading } = useCompanyStats(user?.companyId || 0, {
-    enabled: !!user?.companyId,
-  });
+  const responseRate = React.useMemo(() => {
+    const total = stats?.total ?? 0;
+    const resolved = stats?.resolved ?? 0;
+    if (!total) return 0;
+    return Math.round((resolved / total) * 100);
+  }, [stats]);
 
-  const { data: distribution, isLoading: distributionLoading } = useMessageDistribution(user?.companyId || 0, {
-    enabled: !!user?.companyId,
-  });
+  const recentMessages = messagesData?.data ?? [];
 
-  const { data: groupedAchievements = [], isLoading: achievementsLoading } = useGroupedAchievements(user?.companyId || 0, {
-    enabled: !!user?.companyId,
-  });
+  /* ── copy code ── */
+  const handleCopyCode = React.useCallback(() => {
+    if (!company?.code) return;
+    navigator.clipboard.writeText(company.code);
+    setCopiedCode(true);
+    toast.success(t("company.codeCopiedToClipboard"));
+    const t2 = setTimeout(() => setCopiedCode(false), 2000);
+    return () => clearTimeout(t2);
+  }, [company?.code, t]);
 
-  const { data: growthMetrics, isLoading: growthLoading } = useGrowthMetrics(user?.companyId || 0, {
-    enabled: !!user?.companyId,
-  });
+  /* ── loading ── */
+  const isLoading =
+    statsLoading || companyLoading || plansLoading || messagesLoading;
 
-  const { data: supportInfo } = useSupportInfo();
-  const whatsapp = useWhatsAppSupport();
+  /* ── deleted company ── */
+  const isDeleted = !company && !!user?.companyId && !companyLoading;
+  const isBlocked = company?.status === "Blocked";
 
-  // Получаем достижения, близкие к получению (незавершенные с наибольшим прогрессом)
-  const nearCompletionAchievements = React.useMemo(() => {
-    if (!groupedAchievements.length) return [];
-    
-    // Собираем только незавершенные достижения из всех групп
-    const incompleteAchievements: Array<{
-      achievement: any;
-      current: number;
-      progress: number;
-      completed: boolean;
-      completedAt?: string;
-      categoryTitle: string;
-      category: string;
-    }> = [];
-    
-    groupedAchievements.forEach(group => {
-      const activeAchievement = group.achievements.find(a => !a.completed);
-      if (activeAchievement && activeAchievement.progress > 0) {
-        incompleteAchievements.push({
-          ...activeAchievement,
-          categoryTitle: group.categoryTitleKey,
-          category: group.category,
-        });
-      }
-    });
-    
-    // Сортируем по прогрессу (близкие к получению = высокий прогресс)
-    incompleteAchievements.sort((a, b) => b.progress - a.progress);
-    
-    // Возвращаем только 2 самых близких к получению
-    return incompleteAchievements.slice(0, 2);
-  }, [groupedAchievements]);
+  /* ── plan display name ── */
+  const planDisplayName = React.useMemo(() => {
+    if (company?.status === "Trial") return t("company.trialPeriod");
+    if (currentPlan) return getTranslatedValue(currentPlan.name);
+    return company?.plan ?? t("company.plan");
+  }, [company, currentPlan, t]);
 
-  // Рассчитываем проценты распределения
-  const totalDistribution = (distribution?.complaints || 0) + (distribution?.praises || 0) + (distribution?.suggestions || 0);
-  const complaintPercent = totalDistribution > 0 ? Math.round(((distribution?.complaints || 0) / totalDistribution) * 100) : 0;
-  const praisePercent = totalDistribution > 0 ? Math.round(((distribution?.praises || 0) / totalDistribution) * 100) : 0;
-  const suggestionPercent = totalDistribution > 0 ? Math.round(((distribution?.suggestions || 0) / totalDistribution) * 100) : 0;
+  /* ── telegram mock (wired to real integration when available) ── */
+  const telegramConnected = false;
 
-  // Автоматический сброс состояния копирования через useEffect
-  React.useEffect(() => {
-    if (copiedCode) {
-      const timer = setTimeout(() => setCopiedCode(false), 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [copiedCode]);
-
-  React.useEffect(() => {
-    if (copiedLink) {
-      const timer = setTimeout(() => setCopiedLink(false), 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [copiedLink]);
-
-  React.useEffect(() => {
-    if (copiedPassword) {
-      const timer = setTimeout(() => setCopiedPassword(false), 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [copiedPassword]);
-
-  const handleCopy = (text: string, type: 'code' | 'link' | 'password') => {
-    navigator.clipboard.writeText(text);
-    if (type === 'code') {
-      setCopiedCode(true);
-      toast.success(t("company.codeCopiedToClipboard"));
-    } else if (type === 'link') {
-      setCopiedLink(true);
-      toast.success(t("company.linkCopied"));
-    } else if (type === 'password') {
-      setCopiedPassword(true);
-      toast.success(t("company.passwordCopiedToClipboard"));
-    }
-  };
+  /* ─────────────────────────────────────────────────────────────────────── */
 
   return (
-    <div className={`min-h-screen bg-background flex flex-col overflow-x-hidden w-full ${isFullscreen ? 'h-auto overflow-y-auto' : ''}`}>
+    <div
+      className={`min-h-screen bg-background flex flex-col overflow-x-hidden w-full ${
+        isFullscreen ? "h-auto overflow-y-auto" : ""
+      }`}
+    >
       <CompanyHeader />
-      <div className={`flex flex-col flex-1 w-full min-h-0 ${isFullscreen ? 'h-auto overflow-visible block' : 'overflow-hidden'}`}>
-        <main className={`flex-1 px-4 sm:px-6 py-4 w-full ${isFullscreen ? 'h-auto overflow-visible block' : 'overflow-y-auto'}`}>
-          <div className="w-full space-y-4">
-            {statsLoading || distributionLoading || achievementsLoading || growthLoading || companyLoading || plansLoading ? (
-              <div className="text-center py-12">
-                <p className="text-muted-foreground">{t("common.loading")}</p>
-              </div>
-            ) : !company && user?.companyId ? (
-              // Компания была удалена
-              <Card className="p-6 border-destructive/50 bg-destructive/10 shadow-lg">
-                <div className="flex items-start gap-4">
-                  <div className="flex-shrink-0 w-10 h-10 rounded-full bg-destructive/20 flex items-center justify-center">
-                    <svg className="w-6 h-6 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                    </svg>
+
+      <div
+        className={`flex flex-col flex-1 w-full min-h-0 ${
+          isFullscreen ? "h-auto overflow-visible block" : "overflow-hidden"
+        }`}
+      >
+        <main
+          className={`flex-1 px-4 sm:px-6 py-6 w-full max-w-5xl mx-auto ${
+            isFullscreen ? "h-auto overflow-visible block" : "overflow-y-auto"
+          }`}
+        >
+          {isLoading ? (
+            <DashboardSkeleton />
+          ) : isDeleted ? (
+            <AlertBanner
+              variant="danger"
+              title={t("company.deletedTitle")}
+              message={t("company.deletedMessage")}
+            />
+          ) : (
+            <div className="space-y-6">
+
+              {/* ── HEADER ─────────────────────────────────────────────── */}
+              <div
+                className="border-2 border-foreground/10 p-6 relative overflow-hidden"
+                style={{
+                  boxShadow: `6px 6px 0 0 ${NEON}`,
+                  borderColor: NEON,
+                }}
+              >
+                {/* neon corner accent */}
+                <div
+                  className="absolute -top-4 -right-4 h-20 w-20 opacity-20"
+                  style={{ backgroundColor: NEON }}
+                />
+                <div className="relative z-10 flex items-start justify-between gap-4 flex-wrap">
+                  <div>
+                    <h1 className="text-xl sm:text-2xl md:text-3xl font-black uppercase tracking-tighter leading-none text-foreground">
+                      {company?.name ?? "—"}
+                    </h1>
+                    <div className="flex items-center gap-2 mt-2 flex-wrap">
+                      <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                        {t("company.companyCode")}
+                      </span>
+                      <code
+                        className="font-mono text-sm font-bold px-2 py-0.5 border border-foreground/10"
+                        style={{ color: NEON, backgroundColor: NEON_DIM }}
+                      >
+                        {company?.code ?? "—"}
+                      </code>
+                      <button
+                        onClick={handleCopyCode}
+                        className="p-1 border border-foreground/10 hover:border-primary transition-colors"
+                        title={t("company.copy")}
+                      >
+                        {copiedCode ? (
+                          <FiCheckCircle
+                            className="h-3.5 w-3.5"
+                            style={{ color: SUCCESS }}
+                          />
+                        ) : (
+                          <FiCopy className="h-3.5 w-3.5 text-muted-foreground" />
+                        )}
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <h3 className="text-lg font-semibold text-destructive mb-2">
-                      {t("company.deletedTitle") || "Компания была удалена"}
-                    </h3>
-                    <p className="text-sm text-foreground">
-                      {t("company.deletedMessage") || "Ваша компания была удалена администратором. Ваш аккаунт больше не имеет доступа к сервису. Для получения дополнительной информации свяжитесь с администратором."}
-                    </p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Badge
+                      variant={isBlocked ? "destructive" : "outline"}
+                      className="font-mono"
+                    >
+                      {company?.status ?? "—"}
+                    </Badge>
+                    <Badge className="font-mono">{planDisplayName}</Badge>
                   </div>
                 </div>
-              </Card>
-            ) : (
-              <>
-                {/* Blocked Company Warning - показывается если компания заблокирована */}
-                {company && company.status === "Заблокирована" && (
-                  <Card className="p-6 border-destructive/50 bg-destructive/10 shadow-lg">
-                    <div className="flex items-start gap-4">
-                      <div className="flex-shrink-0 w-10 h-10 rounded-full bg-destructive/20 flex items-center justify-center">
-                        <svg className="w-6 h-6 text-destructive" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-lg font-semibold text-destructive mb-2">
-                          {t("company.blockedTitle") || "Компания заблокирована"}
-                        </h3>
-                        <p className="text-sm text-foreground mb-2">
-                          {supportInfo?.supportWhatsAppNumber
-                            ? t("company.blockedMessageWithNumber", { number: supportInfo.supportWhatsAppNumber })
-                            : t("company.blockedMessage")}
-                        </p>
-                        {supportInfo?.supportWhatsAppNumber && (
-                          <a
-                            href={whatsapp.href}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline mt-2"
-                          >
-                            <FiMessageCircle className="h-4 w-4" />
-                            {t("company.contactSupport") || "Связаться с поддержкой"} — {supportInfo.supportWhatsAppNumber}
-                          </a>
-                        )}
-                        <Badge variant="destructive" className="mt-2">
-                          {t("admin.blocked")}
-                        </Badge>
-                      </div>
-                    </div>
-                  </Card>
-                )}
-                
-                {/* Trial Expired Banner - показывается если пробный период истек */}
-                {company && company.status !== "Заблокирована" && (() => {
-                  // Проверяем, является ли текущий план пробным
-                  const isTrialPlan = currentPlan?.isFree === true || currentPlan?.price === 0 || 
-                    company.plan === "Пробный" || company.plan === "Trial" || company.plan === "Бесплатный" || company.plan === "Free" ||
-                    company.plan === "Сынақ" || company.plan === "Тегін";
-                  
-                  if (!isTrialPlan) return null;
-                  
-                  const trialExpired = company.trialEndDate ? (() => {
-                    try {
-                      const endDate = new Date(company.trialEndDate);
-                      const now = new Date();
-                      return now > endDate;
-                    } catch {
-                      return false;
-                    }
-                  })() : false;
-                  
-                  if (!trialExpired) return null;
-                  
-                  return (
-                    <Card className="p-6 border-primary/50 bg-primary/10 shadow-lg">
-                      <div className="flex items-start gap-4">
-                        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
-                          <FiClock className="w-6 h-6 text-primary" />
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="text-lg font-semibold text-foreground mb-2">
-                            {t("company.trialExpiredTitle") || "Пробный период истек"}
-                          </h3>
-                          <p className="text-sm text-foreground mb-4">
-                            {t("company.trialExpiredMessage") || "Ваш пробный период закончился. Для продолжения работы подключите один из тарифов."}
-                          </p>
-                          <Button
-                            onClick={() => router.push("/company/billing")}
-                            className="bg-primary hover:bg-primary/90"
-                          >
-                            {t("company.choosePlan") || "Выбрать тариф"}
-                            <FiArrowRight className="ml-2 h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </Card>
-                  );
-                })()}
-                
-                {/* Tariff Expired Warning - показывается если тариф истек (не пробный) */}
-                {company && company.status !== "Заблокирована" && isTrialExpired && permissions.isReadOnly && (() => {
-                  // Показываем только если это НЕ пробный план (чтобы не дублировать с баннером выше)
-                  const isTrialPlan = currentPlan?.isFree === true || currentPlan?.price === 0 || 
-                    company.plan === "Пробный" || company.plan === "Trial" || company.plan === "Бесплатный" || company.plan === "Free" ||
-                    company.plan === "Сынақ" || company.plan === "Тегін";
-                  
-                  if (isTrialPlan) return null; // Пробный план уже обработан выше
-                  
-                  return (
-                    <Card className="p-6 border-destructive/50 bg-destructive/10 shadow-lg">
-                      <div className="flex items-start gap-4">
-                        <div className="flex-shrink-0 w-10 h-10 rounded-full bg-destructive/20 flex items-center justify-center">
-                          <FiAlertTriangle className="w-6 h-6 text-destructive" />
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="text-lg font-semibold text-destructive mb-2">
-                            {t("company.tariffExpiredTitle") || "Тариф истек"}
-                          </h3>
-                          <p className="text-sm text-foreground mb-4">
-                            {t("company.tariffExpiredMessage") || "Ваш тариф истек. Доступ к функциям ограничен. Обновите тариф, чтобы продолжить использование всех возможностей сервиса."}
-                          </p>
-                          <Button
-                            onClick={() => router.push("/company/billing")}
-                            className="bg-primary hover:bg-primary/90 text-white"
-                          >
-                            <FiCreditCard className="h-4 w-4 mr-2" />
-                            {t("company.upgradeTariff") || "Обновить тариф"}
-                          </Button>
-                        </div>
-                      </div>
-                    </Card>
-                  );
-                })()}
-                
-                {/* Tariff Info Banner - показывается всегда для всех тарифов */}
-                {company && company.status !== "Заблокирована" && (
-                  <Card className="p-4 sm:p-5 border-border shadow-lg relative overflow-hidden flex-shrink-0" style={{ background: 'linear-gradient(to bottom right, hsl(var(--primary) / 0.08), hsl(var(--primary) / 0.03))' }}>
-                    <div className="absolute top-0 right-0 w-32 h-32 rounded-full -mr-16 -mt-16 opacity-10" style={{ backgroundColor: 'hsl(var(--primary))' }}></div>
-                    <div className="relative z-10">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2.5 mb-2">
-                            <h3 className="text-base sm:text-lg font-bold text-foreground">{t("company.yourTariff")}</h3>
-                            <Badge variant="outline" className="text-xs sm:text-sm px-2.5 py-0.5">
-                              {company.status === "Пробная"
-                                ? t("company.trialPeriod")
-                                : currentPlan
-                                  ? getTranslatedValue(currentPlan.name)
-                                  : company.plan || t("company.plan")}
-                            </Badge>
-                          </div>
-                          {company.trialEndDate && (() => {
-                            const endDate = new Date(company.trialEndDate);
-                            const now = new Date();
-                            const diffTime = endDate.getTime() - now.getTime();
-                            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-                            return (
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <p className="text-xs text-muted-foreground">{t("company.daysUntilTariffEnds")}:</p>
-                                {diffDays > 0 ? (
-                                  <Badge className="bg-primary text-white text-xs px-2.5 py-0.5 font-semibold">
-                                    {diffDays} {diffDays === 1 ? t("company.day") : diffDays < 5 ? t("company.days2") : t("company.days")}
-                                  </Badge>
-                                ) : (
-                                  <Badge className="bg-destructive text-white text-xs px-2.5 py-0.5 font-semibold">
-                                    {t("admin.tariffExpired")}
-                                  </Badge>
-                                )}
-                                <span className="text-xs text-muted-foreground">
-                                  ({new Date(company.trialEndDate).toLocaleDateString("ru-RU", {
-                                    day: "numeric",
-                                    month: "long",
-                                    year: "numeric"
-                                  })})
-                                </span>
-                              </div>
-                            );
-                          })()}
-                        </div>
-                        <div className="flex-shrink-0 text-left sm:text-right">
-                          <p className="text-2xl sm:text-3xl font-bold" style={{ color: 'hsl(var(--primary))' }}>
-                            {company.status === "Пробная"
-                              ? t("common.free")
-                              : currentPlan
-                                ? (currentPlan.price === 0 ? t("common.free") : `${currentPlan.price} ₸`)
-                                : t("common.free")}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </Card>
-                )}
-                
-                {/* Company Code, Link and Password Block */}
-                {company && (
-                  <Card className="p-5 border-border shadow-lg relative overflow-hidden bg-card">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-sm font-semibold text-foreground">{t("company.companyInfo")}</h3>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowSensitiveData(!showSensitiveData)}
-                        className="h-8 w-8"
+              </div>
+
+              {/* ── ALERTS ────────────────────────────────────────────── */}
+              {isBlocked && (
+                <AlertBanner
+                  variant="danger"
+                  title={t("company.blockedTitle")}
+                  message={
+                    supportInfo?.supportWhatsAppNumber
+                      ? t("company.blockedMessageWithNumber", {
+                          number: supportInfo.supportWhatsAppNumber,
+                        })
+                      : t("company.blockedMessage")
+                  }
+                  extra={
+                    supportInfo?.supportWhatsAppNumber ? (
+                      <a
+                        href={whatsapp.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide hover:underline"
+                        style={{ color: DANGER }}
                       >
-                        {showSensitiveData ? (
-                          <FiEyeOff className="h-4 w-4" />
-                        ) : (
-                          <FiEye className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-5">
-                      {/* Company Code */}
-                      <div className="space-y-2 sm:space-y-2.5">
-                        <label className="text-xs sm:text-sm font-medium text-muted-foreground">{t("company.companyCode")}</label>
-                        <div className="flex items-center gap-2">
-                          <code className="flex-1 text-base sm:text-lg md:text-xl font-mono font-bold text-primary bg-muted px-2 sm:px-3 md:px-4 py-2 sm:py-2.5 md:py-3 rounded-md tracking-wider min-w-0 overflow-hidden text-ellipsis">
-                            {showSensitiveData ? company.code : '••••••••'}
-                          </code>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleCopy(company.code, 'code')}
-                            className="h-9 sm:h-10 w-9 sm:w-10 flex-shrink-0"
-                          >
-                            {copiedCode ? (
-                              <FiCheckCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-success" />
-                            ) : (
-                              <FiCopy className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
+                        <FiMessageCircle className="h-3.5 w-3.5" />
+                        {t("company.contactSupport")} —{" "}
+                        {supportInfo.supportWhatsAppNumber}
+                      </a>
+                    ) : null
+                  }
+                />
+              )}
 
-                      {/* Share Link */}
-                      <div className="space-y-2 sm:space-y-2.5">
-                        <label className="text-xs sm:text-sm font-medium text-muted-foreground">{t("company.shareLink")}</label>
-                        <div className="flex items-center gap-2">
-                          <Input
-                            value={showSensitiveData ? shareLink : '••••••••••••••••••••••••••••'}
-                            readOnly
-                            className="font-mono text-xs sm:text-sm h-9 sm:h-10 min-w-0 flex-1"
-                            autoComplete="off"
-                          />
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleCopy(shareLink, 'link')}
-                            className="h-9 sm:h-10 w-9 sm:w-10 flex-shrink-0"
-                          >
-                            {copiedLink ? (
-                              <FiCheckCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-success" />
-                            ) : (
-                              <FiShare2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                            )}
-                          </Button>
-                        </div>
-                      </div>
+              {!isBlocked && isFreeOrTrial && isTrialExpired && (
+                <AlertBanner
+                  variant="warning"
+                  title={t("company.trialExpiredTitle")}
+                  message={t("company.trialExpiredMessage")}
+                  action={{
+                    label: t("company.choosePlan"),
+                    onClick: () => router.push("/company/billing"),
+                  }}
+                />
+              )}
 
-                      {/* Daily Password */}
-                      <div className="space-y-2 sm:space-y-2.5">
-                        <label className="text-xs sm:text-sm font-medium text-muted-foreground">{t("company.passwordForSendingMessages")}</label>
-                        <div className="flex items-center gap-2">
-                          <Input
-                            value={showSensitiveData && dailyPassword ? dailyPassword : '••••••••••'}
-                            readOnly
-                            className="font-mono text-xs sm:text-sm h-9 sm:h-10 min-w-0 flex-1"
-                            autoComplete="off"
-                            suppressHydrationWarning
-                          />
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleCopy(dailyPassword, 'password')}
-                            className="h-9 sm:h-10 w-9 sm:w-10 flex-shrink-0"
-                          >
-                            {copiedPassword ? (
-                              <FiCheckCircle className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-success" />
-                            ) : (
-                              <FiCopy className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                            )}
-                          </Button>
-                        </div>
-                        <p className="text-xs text-muted-foreground">{t("company.updatesAutomaticallyDaily")}</p>
-                      </div>
-                    </div>
-                  </Card>
+              {!isBlocked && !isFreeOrTrial && isPlanExpired && (
+                <AlertBanner
+                  variant="danger"
+                  title={t("company.tariffExpiredTitle")}
+                  message={t("company.tariffExpiredMessageShort")}
+                  action={{
+                    label: t("company.upgradeTariff"),
+                    onClick: () => router.push("/company/billing"),
+                  }}
+                />
+              )}
+
+              {/* ── STATS GRID ─────────────────────────────────────────── */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <StatCard
+                  label={t("company.totalReviews")}
+                  value={stats?.total ?? 0}
+                  icon={<FiMessageSquare className="h-4 w-4" />}
+                  accentColor={NEON}
+                  accentBg={NEON_DIM}
+                />
+                <StatCard
+                  label={t("company.newMessages")}
+                  value={stats?.new ?? 0}
+                  icon={<FiZap className="h-4 w-4" />}
+                  accentColor={NEON}
+                  accentBg={NEON_DIM}
+                  indicator="neon"
+                />
+                <StatCard
+                  label={t("company.resolved")}
+                  value={stats?.resolved ?? 0}
+                  icon={<FiCheckCircle className="h-4 w-4" />}
+                  accentColor={SUCCESS}
+                  accentBg={SUCCESS_DIM}
+                  indicator="success"
+                />
+                <StatCard
+                  label={t("company.resolutionRate")}
+                  value={responseRate}
+                  suffix="%"
+                  icon={<FiBarChart2 className="h-4 w-4" />}
+                  accentColor={responseRate >= 70 ? SUCCESS : NEON}
+                  accentBg={responseRate >= 70 ? SUCCESS_DIM : NEON_DIM}
+                />
+              </div>
+
+              {/* ── QUICK ACTIONS ─────────────────────────────────────── */}
+              <div className="flex flex-col sm:flex-row flex-wrap gap-3">
+                <Button
+                  onClick={() => router.push("/company/messages")}
+                  size="sm"
+                  className="w-full sm:w-auto"
+                >
+                  <FiMessageSquare className="h-4 w-4" />
+                  {t("company.messages").toUpperCase()}
+                </Button>
+
+                {!permissions.isReadOnly && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => router.push("/company/reports")}
+                  >
+                    <FiBarChart2 className="h-4 w-4" />
+                    {t("company.reports").toUpperCase()}
+                  </Button>
                 )}
 
-                {/* Combined Stats Block */}
-                {!permissions.isReadOnly && (
-                <Card className="p-5 border-border shadow-lg relative overflow-hidden bg-card">
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                    {/* Stats Row */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-3 gap-4 lg:col-span-2">
-                      <div className="flex items-center gap-3 p-4 rounded-lg" style={{ background: 'linear-gradient(to bottom right, hsl(var(--accent) / 0.08), hsl(var(--accent) / 0.03))' }}>
-                        <div className="p-2 rounded-lg" style={{ backgroundColor: 'hsl(var(--accent))' }}>
-                          <FiMessageSquare className="h-4 w-4 text-white" />
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-1">{t("company.newMessages")}</p>
-                          <p className="text-2xl font-bold" style={{ color: 'hsl(var(--accent))' }}>{stats?.new || 0}</p>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-3 p-4 rounded-lg" style={{ background: 'linear-gradient(to bottom right, hsl(var(--secondary) / 0.08), hsl(var(--secondary) / 0.03))' }}>
-                        <div className="p-2 rounded-lg" style={{ backgroundColor: 'hsl(var(--secondary))' }}>
-                          <FiClock className="h-4 w-4 text-white" />
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-1">{t("company.inProgress")}</p>
-                          <p className="text-2xl font-bold" style={{ color: 'hsl(var(--secondary))' }}>{stats?.inProgress || 0}</p>
-                        </div>
-                      </div>
-                      
-                      <div className="flex items-center gap-3 p-4 rounded-lg" style={{ background: 'linear-gradient(to bottom right, hsl(var(--success) / 0.08), hsl(var(--success) / 0.03))' }}>
-                        <div className="p-2 rounded-lg" style={{ backgroundColor: 'hsl(var(--success))' }}>
-                          <FiCheckCircle className="h-4 w-4 text-white" />
-                        </div>
-                        <div>
-                          <p className="text-xs font-medium text-muted-foreground mb-1">{t("company.resolved")}</p>
-                          <p className="text-2xl font-bold" style={{ color: 'hsl(var(--success))' }}>{stats?.resolved || 0}</p>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Distribution Section */}
-                    {totalDistribution > 0 && (
-                      <div className="lg:col-span-1 lg:pl-5 lg:border-l lg:border-border/50">
-                        <h3 className="text-sm font-semibold mb-4">{t("company.messageDistribution")}</h3>
-                        <div className="space-y-3">
-                          <div>
-                            <div className="flex items-center justify-between text-sm mb-2">
-                              <span className="text-muted-foreground">{t("sendMessage.complaint")}</span>
-                              <span className="font-semibold">{complaintPercent}%</span>
-                            </div>
-                            <div className="h-2 bg-muted rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-accent rounded-full transition-all duration-500" 
-                                style={{ width: `${complaintPercent}%` }}
-                              />
-                            </div>
-                          </div>
-                          
-                          <div>
-                            <div className="flex items-center justify-between text-sm mb-2">
-                              <span className="text-muted-foreground">{t("sendMessage.praise")}</span>
-                              <span className="font-semibold">{praisePercent}%</span>
-                            </div>
-                            <div className="h-2 bg-muted rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-secondary rounded-full transition-all duration-500" 
-                                style={{ width: `${praisePercent}%` }}
-                              />
-                            </div>
-                          </div>
-                          
-                          <div>
-                            <div className="flex items-center justify-between text-sm mb-2">
-                              <span className="text-muted-foreground">{t("sendMessage.suggestion")}</span>
-                              <span className="font-semibold">{suggestionPercent}%</span>
-                            </div>
-                            <div className="h-2 bg-muted rounded-full overflow-hidden">
-                              <div 
-                                className="h-full bg-primary rounded-full transition-all duration-500" 
-                                style={{ width: `${suggestionPercent}%` }}
-                              />
-                            </div>
-                          </div>
-                        </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => router.push("/company/settings")}
+                >
+                  <FiSettings className="h-4 w-4" />
+                  {t("company.settings").toUpperCase()}
+                </Button>
+
+                {!telegramConnected && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => router.push("/company/settings")}
+                    style={{
+                      borderColor: NEON,
+                      color: NEON,
+                    }}
+                    className="hover:bg-primary hover:text-black"
+                  >
+                    <FiZap className="h-4 w-4" />
+                    {t("telegram.connectButton") || "CONNECT TELEGRAM"}
+                  </Button>
+                )}
+              </div>
+
+              {/* ── PLAN INFO ─────────────────────────────────────────── */}
+              <div
+                className="border-2 border-foreground/10 bg-card"
+                style={{ boxShadow: "4px 4px 0 0 hsl(var(--foreground)/0.1)" }}
+              >
+                <div className="p-5 border-b-2 border-foreground/10 flex items-center justify-between gap-3 flex-wrap">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-0.5">
+                      {t("company.currentPlan")}
+                    </p>
+                    <p className="text-xl font-black uppercase tracking-tight text-foreground">
+                      {planDisplayName}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    {daysRemaining !== null && (
+                      <div>
+                        <Badge
+                          variant={
+                            daysRemaining <= 0
+                              ? "destructive"
+                              : daysRemaining <= 7
+                              ? "outline"
+                              : "default"
+                          }
+                          className="font-mono text-sm px-3"
+                        >
+                          {daysRemaining > 0
+                            ? `${daysRemaining}d`
+                            : t("admin.tariffExpired")}
+                        </Badge>
+                        <p className="text-[10px] text-muted-foreground mt-1 uppercase tracking-wider">
+                          {t("company.daysUntilTariffEnds")}
+                        </p>
                       </div>
                     )}
                   </div>
-                  
-                  {/* Button */}
-                  <div className="pt-4 mt-4 border-t border-border/50 flex justify-end">
-                    <Button 
+                </div>
+
+                <div className="p-5 space-y-3">
+                  {/* Messages usage */}
+                  {(currentPlan?.messagesLimit ?? company?.messagesLimit ?? 0) >
+                    0 && (
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                          {t("company.messagesLabel")}
+                        </p>
+                        <p className="font-mono text-xs font-bold">
+                          <span style={{ color: NEON }}>
+                            {company?.messagesThisMonth ?? 0}
+                          </span>
+                          <span className="text-muted-foreground">
+                            {" "}
+                            / {currentPlan?.messagesLimit ?? company?.messagesLimit}
+                          </span>
+                        </p>
+                      </div>
+                      {/* Brutalist progress — square, no rounding */}
+                      <div className="h-3 w-full border border-foreground/10 bg-muted overflow-hidden">
+                        <div
+                          className="h-full transition-all duration-500"
+                          style={{
+                            width: `${messagesUsedPct}%`,
+                            backgroundColor:
+                              messagesUsedPct >= 90 ? DANGER : NEON,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {isFreeOrTrial && !isTrialExpired && (
+                    <Button
+                      onClick={() => router.push("/company/billing")}
+                      size="sm"
+                      className="w-full sm:w-auto"
+                    >
+                      <FiCreditCard className="h-4 w-4" />
+                      UPGRADE
+                    </Button>
+                  )}
+                </div>
+              </div>
+
+              {/* ── RECENT ACTIVITY ───────────────────────────────────── */}
+              {!permissions.isReadOnly && (
+                <div
+                  className="border-2 border-foreground/10 bg-card"
+                  style={{
+                    boxShadow: "4px 4px 0 0 hsl(var(--foreground)/0.1)",
+                  }}
+                >
+                  <div className="p-5 border-b-2 border-foreground/10 flex items-center justify-between">
+                    <p className="text-xs font-bold uppercase tracking-widest text-foreground">
+                      {t("company.recentMessages")}
+                    </p>
+                    <Button
+                      variant="ghost"
+                      size="icon"
                       onClick={() => router.push("/company/messages")}
-                      variant="outline"
-                      size="icon"
-                      className="h-10 w-10 rounded-full shadow-sm hover:shadow-md transition-all duration-200 ml-auto"
-                      aria-label={t("company.toMessages")}
+                      className="h-8 w-8"
+                      aria-label={t("company.viewAll")}
                     >
                       <FiArrowRight className="h-4 w-4" />
                     </Button>
                   </div>
-                </Card>
-                )}
 
-                {/* Near Completion Achievements and Growth Rating Block */}
-                {!permissions.isReadOnly && (
-                <Card className="p-5 border-border shadow-lg relative overflow-hidden bg-card">
-                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-                    {/* Achievements Section */}
-                    <div className="lg:col-span-2">
-                      <div className="flex items-center gap-2 mb-4">
-                        <div className="p-2 rounded-lg" style={{ backgroundColor: 'hsl(var(--primary))' }}>
-                          <FiAward className="h-4 w-4 text-white" />
-                        </div>
-                        <h3 className="text-sm font-semibold">{t("company.achievements")}</h3>
-                      </div>
-                      {nearCompletionAchievements.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">{t("company.noAchievements")}</p>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          {nearCompletionAchievements.map((achievement) => {
-                            const categoryTitle = t(achievement.categoryTitle);
-                            const level = achievement.achievement.level || 1;
-                            const target = achievement.achievement.target;
-                            
-                            let description = "";
-                            const titleKey = achievement.achievement.titleKey;
-                            
-                            if (titleKey) {
-                              const translationParams: Record<string, any> = {};
-                              if (titleKey.includes("level") || titleKey.includes("reviews") || titleKey.includes("resolved") || titleKey.includes("responseSpeed") || titleKey.includes("longevity")) {
-                                translationParams.level = level;
-                                translationParams.target = target;
-                              } else {
-                                translationParams.target = target;
-                              }
-                              description = String(t(titleKey, translationParams));
-                            }
-                            
-                            // Вычисляем остаток до завершения
-                            const remaining = target - achievement.current;
-                            
-                            // Определяем текст в зависимости от прогресса
-                            const getRemainingText = () => {
-                              if (achievement.progress >= 90) return t("company.remainingLittle");
-                              if (achievement.progress >= 75) return t("company.almostReady");
-                              if (achievement.progress >= 50) return t("company.halfway");
-                              return t("company.remaining", { count: remaining });
-                            };
-                            
-                            return (
-                              <div key={`${achievement.category}-${achievement.achievement.id}`} className="p-4 border rounded-lg bg-card hover:shadow-sm transition-shadow">
-                                <div className="flex items-start justify-between gap-3 mb-3">
-                                  <div className="flex-1 min-w-0">
-                                    <h4 className="text-sm font-semibold text-foreground leading-tight mb-1">{categoryTitle}</h4>
-                                    {description && (
-                                      <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">
-                                        {description}
-                                      </p>
-                                    )}
-                                  </div>
-                                  <div className="flex-shrink-0 flex flex-col items-end gap-1">
-                                    <span className="text-lg font-bold text-primary whitespace-nowrap">
-                                      {achievement.progress}%
-                                    </span>
-                                    {remaining > 0 && (
-                                      <span className={`text-xs whitespace-nowrap ${
-                                        achievement.progress >= 90 
-                                          ? "text-primary font-semibold" 
-                                          : "text-muted-foreground"
-                                      }`}>
-                                        {getRemainingText()}
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                                <Progress value={achievement.progress} className="h-2" />
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+                  {recentMessages.length === 0 ? (
+                    <div className="p-5 text-center">
+                      <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                        {t("company.noMessages")}
+                      </p>
                     </div>
-                    
-                    {/* Growth Rating Section */}
-                    <div className="lg:col-span-1 lg:pl-5 lg:border-l lg:border-border/50">
-                      <div className="flex items-center gap-2 mb-4">
-                        <div className="p-2 rounded-lg" style={{ backgroundColor: 'hsl(var(--primary))' }}>
-                          <FiStar className="h-4 w-4 text-white fill-white" />
-                        </div>
-                        <h3 className="text-sm font-semibold">{t("company.growthRating")}</h3>
-                      </div>
-                      <div className="space-y-3">
-                        <div className="p-4 rounded-lg" style={{ background: 'linear-gradient(to bottom right, hsl(var(--primary) / 0.08), hsl(var(--primary) / 0.03))' }}>
-                          <div className="flex items-baseline gap-1 mb-2">
-                            <span className="text-3xl font-bold" style={{ color: 'hsl(var(--primary))' }}>
-                              {growthMetrics?.rating?.toFixed(1) || "0.0"}
-                            </span>
-                            <span className="text-sm font-semibold text-muted-foreground">/ 10</span>
+                  ) : (
+                    <ul className="divide-y divide-foreground/5">
+                      {recentMessages.slice(0, 5).map((msg) => (
+                        <li
+                          key={msg.id}
+                          className="px-5 py-3 flex items-start gap-3 hover:bg-muted/40 transition-colors cursor-pointer"
+                          onClick={() => router.push("/company/messages")}
+                        >
+                          {/* type indicator */}
+                          <span
+                            className="mt-0.5 flex-shrink-0 h-2 w-2 border"
+                            style={{
+                              backgroundColor:
+                                msg.type === "praise"
+                                  ? SUCCESS
+                                  : msg.type === "complaint"
+                                  ? DANGER
+                                  : NEON,
+                              borderColor:
+                                msg.type === "praise"
+                                  ? SUCCESS
+                                  : msg.type === "complaint"
+                                  ? DANGER
+                                  : NEON,
+                            }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs text-foreground leading-relaxed line-clamp-2 font-medium">
+                              {msg.content}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5 font-mono uppercase tracking-wider">
+                              {new Date(msg.createdAt).toLocaleDateString()}
+                              {" · "}
+                              {msg.status}
+                            </p>
                           </div>
-                          <p className="text-xs text-muted-foreground leading-relaxed">
-                            {growthMetrics?.rating && growthMetrics.rating >= 8
-                              ? t("company.cultureExcellent")
-                              : growthMetrics?.rating && growthMetrics.rating >= 6
-                              ? t("company.cultureStrong")
-                              : growthMetrics?.rating && growthMetrics.rating >= 4
-                              ? t("company.cultureDeveloping")
-                              : t("company.cultureNeedsAttention")}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* Button */}
-                  <div className="pt-4 mt-4 border-t border-border/50 flex justify-end">
-                    <Button 
-                      onClick={() => router.push("/company/growth")}
-                      variant="outline"
-                      size="icon"
-                      className="h-10 w-10 rounded-full shadow-sm hover:shadow-md transition-all duration-200 ml-auto"
-                      aria-label={t("company.growth")}
-                    >
-                      <FiArrowRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </Card>
-                )}
+                          <Badge
+                            variant={
+                              msg.status === "Resolved"
+                                ? "default"
+                                : msg.status === "New"
+                                ? "outline"
+                                : "secondary"
+                            }
+                            className="flex-shrink-0 text-[10px] font-mono"
+                          >
+                            {msg.type}
+                          </Badge>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
 
-                {/* Support Card */}
-                {supportInfo?.supportWhatsAppNumber && (
-                  <Card className="p-5 border-border shadow-lg relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-24 h-24 rounded-full -mr-10 -mt-10 opacity-10" style={{ backgroundColor: 'hsl(var(--primary))' }} />
-                    <div className="relative z-10">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2.5 rounded-xl shadow-sm" style={{ background: 'linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary) / 0.8))' }}>
-                          <FiHeadphones className="h-5 w-5 text-white" />
-                        </div>
-                        <div className="flex-1">
-                          <h3 className="text-sm font-semibold">{t("company.support") || "Поддержка"}</h3>
-                          <p className="text-xs text-muted-foreground">{t("company.supportDescription") || "Мы всегда на связи"}</p>
-                        </div>
+              {/* ── SUPPORT ────────────────────────────────────────────── */}
+              {supportInfo?.supportWhatsAppNumber && (
+                <div
+                  className="border-2 border-foreground/10 bg-card p-5 relative overflow-hidden"
+                  style={{
+                    boxShadow: "4px 4px 0 0 hsl(var(--foreground)/0.1)",
+                  }}
+                >
+                  {/* neon accent strip */}
+                  <div
+                    className="absolute left-0 top-0 bottom-0 w-1"
+                    style={{ backgroundColor: NEON }}
+                  />
+                  <div className="pl-4 flex items-start gap-3">
+                    <div
+                      className="flex-shrink-0 p-2 border border-foreground/10"
+                      style={{ backgroundColor: NEON_DIM }}
+                    >
+                      <FiHeadphones
+                        className="h-4 w-4"
+                        style={{ color: NEON }}
+                      />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                        <p className="text-xs font-black uppercase tracking-widest text-foreground">
+                          {t("company.support")}
+                        </p>
                         {permissions.isPro && (
-                          <Badge variant="default" className="text-xs">
-                            {t("company.prioritySupport") || "Приоритетная"}
+                          <Badge className="text-[10px] font-mono">
+                            {t("company.prioritySupport")}
                           </Badge>
                         )}
                       </div>
@@ -779,24 +801,19 @@ const CompanyDashboard = () => {
                         href={whatsapp.href}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-3 p-3.5 rounded-xl transition-all duration-200 hover:shadow-md group"
-                        style={{ background: 'linear-gradient(to right, hsl(var(--primary) / 0.08), hsl(var(--primary) / 0.03))' }}
+                        className="inline-flex items-center gap-1.5 font-mono text-sm font-bold hover:underline"
+                        style={{ color: NEON }}
                       >
-                        <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ backgroundColor: 'hsl(142 70% 45%)' }}>
-                          <FiMessageCircle className="h-5 w-5 text-white" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-muted-foreground mb-0.5">{t("company.globalSupportNumber") || "Глобальная поддержка"}</p>
-                          <p className="text-sm font-bold" style={{ color: 'hsl(var(--primary))' }}>{supportInfo.supportWhatsAppNumber}</p>
-                        </div>
-                        <FiExternalLink className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
+                        {supportInfo.supportWhatsAppNumber}
+                        <FiExternalLink className="h-3.5 w-3.5" />
                       </a>
                     </div>
-                  </Card>
-                )}
-              </>
-            )}
-          </div>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          )}
         </main>
       </div>
     </div>

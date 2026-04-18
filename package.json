@@ -1,5 +1,6 @@
 {
-  "name": "anonymouschat",
+  "name": "sayless",
+  "description": "Sayless — Anonymous Feedback Platform",
   "version": "0.1.0",
   "private": true,
   "license": "MIT",

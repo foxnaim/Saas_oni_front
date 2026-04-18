@@ -53,7 +53,7 @@ export const useNextAuth = () => {
       // Проверяем, есть ли токен в куках, перед тем как делать логаут
       // Если токен есть, значит мы залогинены через Credentials (не NextAuth)
       // В этом случае НЕ нужно делать logout
-      const hasCookieToken = typeof window !== 'undefined' ? document.cookie.includes('feedbackhub_token') : false;
+      const hasCookieToken = typeof window !== 'undefined' ? document.cookie.includes('sayless_token') : false;
       
       if (!hasCookieToken) {
         // Очищаем состояние при выходе

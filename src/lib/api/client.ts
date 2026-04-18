@@ -89,13 +89,13 @@ class ApiClient {
     
     if (token && !headers.has('Authorization')) {
       headers.set('Authorization', `Bearer ${token}`);
-    } else if (!token) {
     }
 
     try {
       const response = await fetch(url, {
         ...options,
         headers,
+        credentials: 'include',
         signal: controller.signal,
       });
 

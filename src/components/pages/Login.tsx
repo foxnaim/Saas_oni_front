@@ -132,14 +132,14 @@ const Login = () => {
               <Link href="/" className="inline-block mb-4">
                 <Image
                   src="/feedBack.svg"
-                  alt="Anonymous Chat"
+                  alt="Sayless"
                   width={48}
                   height={48}
                   priority
                   className="h-12 w-12 mx-auto"
                 />
               </Link>
-              <h1 className="text-3xl font-bold text-foreground mb-2">FeedbackHub</h1>
+              <h1 className="text-3xl font-bold text-foreground mb-2">SAYLESS</h1>
               <p className="text-muted-foreground">{t("auth.login")}</p>
             </div>
           </div>
@@ -184,10 +184,10 @@ const Login = () => {
                     </button>
                   </div>
                 </div>
-                <div className="bg-muted p-4 rounded-lg text-sm text-muted-foreground">
+                <div className="bg-muted p-4 rounded-none text-sm text-muted-foreground">
                   <p className="font-semibold mb-1">Демо доступ:</p>
                   <p>Email: admin@acme.com (компания)</p>
-                  <p>Email: admin@feedbackhub.com (админ)</p>
+                  <p>Email: admin@sayless.app (админ)</p>
                   <p>Пароль: password</p>
                 </div>
                 <Button type="submit" className="w-full" disabled={isLoading}>

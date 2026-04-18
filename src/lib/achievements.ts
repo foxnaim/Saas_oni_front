@@ -142,7 +142,7 @@ function calculateCompanyStats(
 ): CompanyAchievementData {
   const now = new Date();
   const totalMessages = messages.length;
-  const resolvedStatus: MessageStatus = "Решено";
+  const resolvedStatus: MessageStatus = "Resolved";
   const resolvedMessages = messages.filter((m) => m.status === resolvedStatus).length;
 
   // Расчет скорости ответа

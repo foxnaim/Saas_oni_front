@@ -36,11 +36,11 @@ export const PAGINATION = {
 
 // Message Statuses
 export const MESSAGE_STATUSES = {
-  NEW: 'Новое',
-  IN_PROGRESS: 'В работе',
-  RESOLVED: 'Решено',
-  REJECTED: 'Отклонено',
-  SPAM: 'Спам',
+  NEW: 'New',
+  IN_PROGRESS: 'InProgress',
+  RESOLVED: 'Resolved',
+  REJECTED: 'Rejected',
+  SPAM: 'Spam',
 } as const;
 
 // Message Types
@@ -52,9 +52,9 @@ export const MESSAGE_TYPES = {
 
 // Company Statuses
 export const COMPANY_STATUSES = {
-  ACTIVE: 'Активна',
-  TRIAL: 'Пробная',
-  BLOCKED: 'Заблокирована',
+  ACTIVE: 'Active',
+  TRIAL: 'Trial',
+  BLOCKED: 'Blocked',
 } as const;
 
 // User Roles

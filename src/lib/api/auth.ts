@@ -133,6 +133,30 @@ export interface ChangePasswordResponse {
   message: string;
 }
 
+export interface TelegramAuthData {
+  id: number;
+  first_name?: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+  auth_date: number;
+  hash: string;
+}
+
+export interface TelegramAuthResponse {
+  success: boolean;
+  data: {
+    user: {
+      id: string;
+      email: string;
+      role: string;
+      companyId?: string;
+      name?: string;
+    };
+    token: string;
+  };
+}
+
 class AuthService {
   /**
    * Вход в систему
@@ -197,6 +221,13 @@ class AuthService {
    */
   async changePassword(data: ChangePasswordRequest): Promise<ChangePasswordResponse> {
     return apiClient.post<ChangePasswordResponse>('/auth/change-password', data);
+  }
+
+  /**
+   * Аутентификация через Telegram
+   */
+  async telegramAuth(data: TelegramAuthData): Promise<TelegramAuthResponse> {
+    return apiClient.post<TelegramAuthResponse>('/auth/telegram-auth', data);
   }
 }
 

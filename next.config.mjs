@@ -1,7 +1,9 @@
 import { createHash } from 'crypto';
 
+// Sayless – Next.js configuration
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  output: 'standalone',
   eslint: {
     ignoreDuringBuilds: true
   },
@@ -123,7 +125,7 @@ const nextConfig = {
           },
           {
             key: 'Content-Security-Policy',
-            value: `default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://www.paypal.com https://www.sandbox.paypal.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; frame-src 'self' https://www.paypal.com https://www.sandbox.paypal.com; connect-src 'self' https://${httpDomain} wss://${apiDomain} https://www.paypal.com https://www.sandbox.paypal.com;`
+            value: `default-src 'self'; script-src 'self' 'unsafe-eval' 'unsafe-inline' https://www.paypal.com https://www.sandbox.paypal.com https://telegram.org https://oauth.telegram.org; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; frame-src 'self' https://www.paypal.com https://www.sandbox.paypal.com https://telegram.org https://oauth.telegram.org; connect-src 'self' https://${httpDomain} wss://${apiDomain} https://www.paypal.com https://www.sandbox.paypal.com;`
           }
         ]
       }

@@ -2,15 +2,15 @@ import type { DefaultSeoProps } from "next-seo";
 import { APP_CONFIG } from "./constants";
 
 const defaultSeo: DefaultSeoProps = {
-  title: `${APP_CONFIG.NAME} — безопасные и быстрые комьюнити`,
+  title: `${APP_CONFIG.NAME} — Anonymous Feedback`,
   description:
-    "Заранее настроенный фронтенд на Next.js + TypeScript для мгновенного запуска приватных чатов с анимациями, SEO и интеграциями.",
+    "Anonymous feedback platform for companies. Send and receive honest feedback safely.",
   canonical: APP_CONFIG.SITE_URL,
   additionalMetaTags: [
     {
       name: "keywords",
       content:
-        "next.js, tailwind, anonymous chat, secure messaging, framer motion, redux, tanstack query"
+        "sayless, anonymous feedback, company feedback, honest feedback, HR, feedback platform"
     }
   ],
   openGraph: {
@@ -28,8 +28,8 @@ const defaultSeo: DefaultSeoProps = {
     ]
   },
   twitter: {
-    handle: "@feedbackhub",
-    site: "@feedbackhub",
+    handle: "@sayless",
+    site: "@sayless",
     cardType: "summary_large_image"
   }
 };

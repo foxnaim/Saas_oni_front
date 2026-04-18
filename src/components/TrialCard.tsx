@@ -52,7 +52,7 @@ const TrialCard = ({ company }: TrialCardProps) => {
 
   return (
     <Card className="p-6 border-border shadow-lg relative overflow-hidden bg-card">
-      <div className="absolute top-0 right-0 w-20 h-20 rounded-full -mr-10 -mt-10 opacity-10 bg-primary"></div>
+      <div className="absolute top-0 right-0 w-20 h-20 rounded-none -mr-10 -mt-10 opacity-10 bg-primary"></div>
       <div className="relative z-10">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-bold text-foreground">{t("admin.trial")}</h3>
@@ -76,7 +76,7 @@ const TrialCard = ({ company }: TrialCardProps) => {
           </p>
         </div>
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex-shrink-0 rounded-full p-1" style={{ backgroundColor: 'hsl(var(--primary))15' }}>
+          <div className="mt-0.5 flex-shrink-0 rounded-none p-1" style={{ backgroundColor: 'hsl(var(--primary))15' }}>
             <FiCheck className="h-3.5 w-3.5" style={{ color: 'hsl(var(--primary))' }} />
           </div>
           <span className="text-sm text-foreground leading-relaxed">

@@ -341,3 +341,21 @@ export const adminService = {
   },
 };
 
+// ========== TELEGRAM SERVICES ==========
+import { authService as _authService } from '../api/auth';
+import type { TelegramAuthData, TelegramAuthResponse } from '../api/auth';
+import { companyApi as _companyApi } from '../api/companies';
+
+export const telegramService = {
+  telegramAuth: async (data: TelegramAuthData): Promise<TelegramAuthResponse> => {
+    return _authService.telegramAuth(data);
+  },
+
+  linkTelegram: async (companyId: string, chatId: string): Promise<{ companyId: string; telegramChatId: string }> => {
+    const response = await _companyApi.linkTelegram(companyId, chatId);
+    return response.data;
+  },
+};
+
+export type { TelegramAuthData, TelegramAuthResponse };
+

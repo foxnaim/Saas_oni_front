@@ -2,7 +2,7 @@
  * Утилиты для работы с куки
  */
 
-const TOKEN_COOKIE_NAME = 'feedbackhub_token';
+const TOKEN_COOKIE_NAME = 'sayless_token';
 const COOKIE_MAX_AGE = 7 * 24 * 60 * 60; // 7 дней в секундах
 
 /**

@@ -1,14 +1,37 @@
 'use client';
 
-import { useState, useEffect, Fragment } from "react";
+import { useState, Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import { Dialog, Transition } from "@headlessui/react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { FiPlus, FiShield, FiTrash2, FiEdit2, FiEye, FiEyeOff, FiAlertTriangle } from "react-icons/fi";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  FiPlus,
+  FiEdit2,
+  FiTrash2,
+  FiEye,
+  FiEyeOff,
+  FiRefreshCw,
+} from "react-icons/fi";
 import { AdminHeader } from "@/components/AdminHeader";
 import { useAdmins, useDeleteAdmin, useCreateAdmin, useUpdateAdmin, queryKeys } from "@/lib/query";
 import type { AdminUser } from "@/types";
@@ -17,859 +40,314 @@ import { useAuth } from "@/lib/redux";
 import { validatePasswordStrength } from "@/lib/utils/validation";
 import { useQueryClient } from "@tanstack/react-query";
 
+const ROLES = ["admin", "super_admin"] as const;
+type Role = typeof ROLES[number];
+
+const roleBadge = (role: string) => {
+  if (role === "super_admin") return "border-2 border-yellow-400 bg-yellow-400/10 text-yellow-400 text-[10px] font-black font-mono uppercase px-2 py-0.5 tracking-widest";
+  return "border-2 border-foreground/40 bg-foreground/5 text-foreground text-[10px] font-black font-mono uppercase px-2 py-0.5 tracking-widest";
+};
+
+const generatePassword = () => {
+  const chars = "ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$%";
+  return Array.from({ length: 16 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+};
+
 const AdminAdmins = () => {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isEditOpen, setIsEditOpen] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [adminToDelete, setAdminToDelete] = useState<AdminUser | null>(null);
-  const { data: admins = [], isLoading, refetch } = useAdmins();
-  const [editAdmin, setEditAdmin] = useState<{
-    id: string;
-    name: string;
-    email: string;
-    password: string;
-    confirmPassword: string;
-  } | null>(null);
-  const [createAdminForm, setCreateAdminForm] = useState({
+  const { user: currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.role === "super_admin";
+
+  const { data: admins = [], isLoading } = useAdmins();
+  const { mutate: createAdmin, isPending: isCreating } = useCreateAdmin();
+  const { mutate: updateAdmin, isPending: isUpdating } = useUpdateAdmin();
+  const { mutate: deleteAdmin, isPending: isDeleting } = useDeleteAdmin();
+
+  // Create dialog
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState({
     name: "",
     email: "",
     password: "",
     confirmPassword: "",
+    role: "admin" as Role,
   });
-  const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [showEditPassword, setShowEditPassword] = useState(false);
-  const [showEditConfirmPassword, setShowEditConfirmPassword] = useState(false);
-  const [showEditPasswordSection, setShowEditPasswordSection] = useState(false);
-  const { user } = useAuth();
+  const [showCreatePwd, setShowCreatePwd] = useState(false);
+  const [showCreateConfirm, setShowCreateConfirm] = useState(false);
 
-  // Функция для сброса формы создания админа
-  const resetCreateAdminForm = () => {
-    setCreateAdminForm({ name: "", email: "", password: "", confirmPassword: "" });
-    setShowPassword(false);
-    setShowConfirmPassword(false);
-  };
-
-  // Сбрасываем состояние при закрытии модальных окон
-  useEffect(() => {
-    if (!isDialogOpen) {
-      resetCreateAdminForm();
-    }
-  }, [isDialogOpen]);
-
-  useEffect(() => {
-    if (!isEditOpen) {
-      setEditAdmin(null);
-      setShowEditPassword(false);
-      setShowEditConfirmPassword(false);
-      setShowEditPasswordSection(false);
-    }
-  }, [isEditOpen]);
-
-  // Фильтруем супер-админа из списка (он управляется через настройки)
-  const filteredAdmins = admins.filter(admin => admin.role !== "super_admin");
-
-  const { mutateAsync: createAdminMutation, isPending: isCreating } = useCreateAdmin({
-    onSuccess: async () => {
-      // Закрываем модальное окно сразу, список обновится через React Query
-      setIsDialogOpen(false);
-      resetCreateAdminForm();
-      toast.success(t("admin.adminCreated") || t("common.success") || "Администратор создан");
-    },
-    onError: async (error: any, variables) => {
-      // apiClient выбрасывает ApiError: { message: string, status: number, code?: string }
-      const backendMessage = String(error?.message || "").trim();
-      const errorStatus = error?.status || error?.response?.status || 0;
-      
-      // Email берем из переменных мутации, чтобы не зависеть от текущего состояния формы
-      const normalizedEmail = (variables?.email || "").trim().toLowerCase();
-
-      const wait = (ms: number) => new Promise(res => setTimeout(res, ms));
-
-      // Вспомогательная проверка (несколько попыток при 409)
-      const checkAfterConflict = async () => {
-        const attempts = [0, 200, 500, 900];
-        for (const delay of attempts) {
-          if (delay) await wait(delay);
-          // Берем данные из кэша, а не делаем запрос
-          const updatedAdmins = queryClient.getQueryData<AdminUser[]>(queryKeys.admins) || [];
-          const exists = updatedAdmins.some(admin => admin.email.toLowerCase() === normalizedEmail);
-          if (exists) {
-            // Помечаем ошибку как обработанную, чтобы внешний catch не показывал тост
-            (error as any).handled = true;
-            setIsDialogOpen(false);
-            resetCreateAdminForm();
-            toast.success(t("admin.adminCreated") || "Администратор создан");
-            return true;
-          }
-        }
-        return false;
-      };
-      
-      // Сначала проверяем список (race condition)
-      const updatedAdmins = queryClient.getQueryData<AdminUser[]>(queryKeys.admins) || [];
-      
-      // Проверяем, не появился ли админ в списке (возможно, он был создан, но пришла ошибка)
-      const adminExists = updatedAdmins.some(admin => admin.email.toLowerCase() === normalizedEmail);
-      
-      // Если админ существует в списке, считаем это успехом (race condition)
-      if (adminExists) {
-        (error as any).handled = true;
-        setIsDialogOpen(false);
-        resetCreateAdminForm();
-        toast.success(t("admin.adminCreated") || "Администратор создан");
-        return;
-      }
-
-      // При 409 пробуем подождать и еще раз проверить список — бэкенд мог создать запись, но вернуть конфликт
-      if (errorStatus === 409) {
-        const resolved = await checkAfterConflict();
-        if (resolved) return;
-      }
-      
-      // Если админ не найден, показываем ошибку
-      
-      // Маппинг сообщений об ошибках - проверяем в строгом порядке приоритета
-      let errorMessage = "";
-      const msgLower = backendMessage.toLowerCase();
-      
-      // 1. Проверка email админа (самая частая ошибка)
-      if (backendMessage.includes("Admin with this email already exists") || 
-          (msgLower.includes("admin") && msgLower.includes("email") && msgLower.includes("already exists"))) {
-        const translated = t("auth.adminEmailAlreadyExists");
-        errorMessage = translated !== "auth.adminEmailAlreadyExists" ? translated : "Администратор с таким email уже существует. Пожалуйста, используйте другой email.";
-      }
-      // 2. Проверка имени админа
-      else if (backendMessage.includes("Admin with this name already exists") || 
-               (msgLower.includes("admin") && msgLower.includes("name") && msgLower.includes("already exists"))) {
-        const translated = t("auth.adminNameAlreadyExists");
-        errorMessage = translated !== "auth.adminNameAlreadyExists" ? translated : "Администратор с таким именем уже существует. Пожалуйста, используйте другое имя.";
-      }
-      // 3. Проверка email компании
-      else if (backendMessage.includes("Company with this email already exists") || 
-               (msgLower.includes("company") && msgLower.includes("email") && msgLower.includes("already exists"))) {
-        const translated = t("auth.companyEmailAlreadyExists");
-        errorMessage = translated !== "auth.companyEmailAlreadyExists" ? translated : "Компания с таким email уже существует. Пожалуйста, используйте другой email.";
-      }
-      // 4. Проверка email пользователя
-      else if (backendMessage.includes("User already exists") ||
-               backendMessage.includes("User with this email already exists") || 
-               (msgLower.includes("user") && msgLower.includes("already exists")) ||
-               (msgLower.includes("email") && msgLower.includes("already exists") && !msgLower.includes("company") && !msgLower.includes("admin"))) {
-        errorMessage = t("auth.userEmailAlreadyExists");
-      }
-      // 5. Обработка ошибок валидации
-      else if (backendMessage.includes("Validation error") || errorStatus === 400) {
-        // Пытаемся извлечь детали валидации
-        const validationDetails = error?.details || error?.response?.data?.error?.details;
-        if (validationDetails && Array.isArray(validationDetails) && validationDetails.length > 0) {
-          // Берем первую ошибку валидации
-          const firstError = validationDetails[0];
-          if (firstError.message) {
-            errorMessage = firstError.message;
-          } else if (firstError.path?.includes("name")) {
-            errorMessage = t("auth.nameRequired") || "Имя обязательно для заполнения";
-          } else if (firstError.path?.includes("email")) {
-            errorMessage = t("auth.invalidEmail") || "Некорректный email";
-          } else {
-            errorMessage = firstError.message || "Ошибка валидации данных";
-          }
-        } else {
-          errorMessage = t("auth.validationError") || "Ошибка валидации данных. Проверьте правильность заполнения полей.";
-        }
-      }
-      // 6. Остальные ошибки
-      else if (backendMessage.includes("Email is required") || 
-               msgLower.includes("required")) {
-        const translated = t("auth.emailAndPasswordRequired");
-        errorMessage = translated !== "auth.emailAndPasswordRequired" ? translated : "Email и пароль обязательны. Пожалуйста, заполните все поля.";
-      }
-      else if (backendMessage.includes("Password must be at least")) {
-        const translated = t("auth.passwordMinLength", { length: 8 });
-        errorMessage = translated && !translated.includes("auth.passwordMinLength") ? translated : "Пароль должен содержать минимум 8 символов. Пожалуйста, выберите более длинный пароль.";
-      }
-      else if (backendMessage.includes("Access denied")) {
-        const translated = t("auth.accessDenied");
-        errorMessage = translated !== "auth.accessDenied" ? translated : "Доступ запрещен. У вас нет прав для выполнения этого действия.";
-      }
-      // 7. Если статус 409, но сообщение не распознано
-      else if (errorStatus === 409) {
-        errorMessage = t("auth.companyConflictError") || "Данные уже существуют. Проверьте уникальность имени и email администратора.";
-      }
-      // 8. Если есть сообщение, показываем общую ошибку на выбранном языке
-      else if (backendMessage && !backendMessage.includes("HTTP error")) {
-        errorMessage = t("common.error");
-      }
-      // 9. Общая ошибка
-      else {
-        errorMessage = t("common.error") || "Произошла ошибка при создании администратора";
-      }
-      
-      // Всегда показываем toast с ошибкой
-      toast.error(errorMessage);
-      
-      // Форма остается открытой с данными, чтобы пользователь мог исправить
-      // Очищаем только пароли для безопасности
-      setCreateAdminForm(prev => ({
-        ...prev,
-        password: "",
-        confirmPassword: "",
-      }));
-    },
+  // Edit dialog
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<AdminUser | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+    role: "admin" as Role,
   });
+  const [showEditPwd, setShowEditPwd] = useState(false);
+  const [showEditConfirm, setShowEditConfirm] = useState(false);
 
-  const updateAdminMutation = useUpdateAdmin({
-    onSuccess: () => {
-      toast.success(t("common.success"));
-      setIsEditOpen(false);
-      setEditAdmin(null);
-      setShowEditPassword(false);
-      setShowEditConfirmPassword(false);
-      // refetchQueries уже выполняется в useUpdateAdmin
-    },
-    onError: (error: any) => {
-      // Получаем сообщение об ошибке с бэкенда
-      const backendMessage = error?.message || error?.response?.data?.error?.message || "";
-      
-      // Маппинг сообщений об ошибках на ключи переводов
-      let translationKey = "admin.updateError";
-      
-      if (backendMessage.includes("Admin with this email already exists") || backendMessage.includes("admin already exists")) {
-        translationKey = "auth.adminEmailAlreadyExists";
-      } else if (backendMessage.includes("User with this email already exists") || backendMessage.includes("user already exists")) {
-        translationKey = "auth.userEmailAlreadyExists";
-      } else if (backendMessage.includes("Access denied")) {
-        translationKey = "auth.accessDenied";
+  // Delete dialog
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AdminUser | null>(null);
+
+  const handleCreate = () => {
+    if (!createForm.name || !createForm.email || !createForm.password) {
+      toast.error(t("common.fillAllFields")); return;
+    }
+    if (createForm.password !== createForm.confirmPassword) {
+      toast.error(t("auth.passwordMismatch")); return;
+    }
+    const v = validatePasswordStrength(createForm.password);
+    if (!v.isValid) { toast.error(v.errors[0]); return; }
+    createAdmin(
+      { name: createForm.name, email: createForm.email, password: createForm.password, role: createForm.role },
+      {
+        onSuccess: () => {
+          toast.success(t("admin.adminCreated") || "Admin created");
+          queryClient.invalidateQueries({ queryKey: queryKeys.admins });
+          setIsCreateOpen(false);
+          setCreateForm({ name: "", email: "", password: "", confirmPassword: "", role: "admin" });
+        },
+        onError: (e: any) => toast.error(e.message || t("common.error")),
       }
-      
-      // Показываем переведенное сообщение или оригинальное, если перевода нет
-      const translatedMessage = t(translationKey);
-      const finalMessage = translatedMessage !== translationKey ? translatedMessage : backendMessage || t("admin.updateError");
-      toast.error(finalMessage);
-    },
-  });
-
-  const deleteAdminMutation = useDeleteAdmin({
-    onMutate: () => {
-      // Закрываем диалог сразу при оптимистичном обновлении для мгновенного UI
-      setIsDeleteDialogOpen(false);
-      setAdminToDelete(null);
-    },
-    onSuccess: async (_, adminId) => {
-      // Показываем успешное уведомление
-      toast.success(t("admin.adminDeleted") || "Администратор удален");
-      // Обновляем список админов с сервера для синхронизации
-      await refetch();
-    },
-    onError: async (error: any) => {
-      // Получаем сообщение об ошибке с бэкенда
-      const backendMessage = error?.message || error?.response?.data?.error?.message || "";
-      const errorStatus = error?.status || error?.response?.status || 0;
-      
-      // Маппинг сообщений об ошибках
-      let errorMessage = "";
-      
-      if (errorStatus === 404 || backendMessage.includes("not found") || backendMessage.includes("не найден")) {
-        // Если 404, считаем, что задача выполнена (админ удален)
-        // Обновляем список с сервера, чтобы убрать уже удаленного админа из UI
-        await refetch();
-        // Закрываем диалог
-        setIsDeleteDialogOpen(false);
-        setAdminToDelete(null);
-        // Не показываем никакого сообщения - админ уже удален, просто обновили список
-        return;
-      } else if (errorStatus === 403 || backendMessage.includes("Access denied") || backendMessage.includes("доступ запрещен")) {
-        errorMessage = t("auth.accessDenied") || "Доступ запрещен";
-      } else if (backendMessage.includes("Cannot delete yourself") || backendMessage.includes("нельзя удалить себя")) {
-        errorMessage = t("admin.cannotDeleteYourself") || "Нельзя удалить самого себя";
-      } else if (backendMessage.includes("Cannot delete super admin") || backendMessage.includes("нельзя удалить суперадмина")) {
-        errorMessage = t("admin.cannotDeleteSuperAdmin") || "Нельзя удалить суперадминистратора";
-      } else if (backendMessage && !backendMessage.includes("HTTP error")) {
-        errorMessage = backendMessage;
-      } else {
-        errorMessage = t("admin.deleteError") || "Произошла ошибка при удалении администратора";
-      }
-      
-      toast.error(errorMessage);
-    },
-  });
-
-  const handleDeleteClick = (admin: AdminUser) => {
-    setAdminToDelete(admin);
-    setIsDeleteDialogOpen(true);
-  };
-
-  const handleDeleteConfirm = () => {
-    if (adminToDelete) {
-      
-      // Проверяем, что ID существует и валиден
-      if (!adminToDelete.id) {
-        toast.error(t("admin.adminNotFound") || "ID администратора не найден");
-        setIsDeleteDialogOpen(false);
-        setAdminToDelete(null);
-        return;
-      }
-      
-      // Удаляем админа (диалог закроется в onSuccess/onError)
-      deleteAdminMutation.mutate(adminToDelete.id);
-    }
-  };
-
-  const handleDeleteCancel = () => {
-    setIsDeleteDialogOpen(false);
-    setAdminToDelete(null);
-  };
-
-  const handleCreate = async () => {
-    // Защита от двойной отправки
-    if (isCreating) {
-      return;
-    }
-
-    const { name, email, password, confirmPassword } = createAdminForm;
-
-    // Нормализуем данные сразу для валидации
-    const normalizedEmail = email.trim().toLowerCase();
-    const normalizedName = name.trim();
-    const normalizedPassword = password.trim();
-    const normalizedConfirm = confirmPassword.trim();
-
-    // Проверка заполненности обязательных полей (email + пароли). Имя можно не заполнять.
-    if (!normalizedEmail || !normalizedPassword || !normalizedConfirm) {
-      toast.error(t("common.fillAllFields"));
-      return;
-    }
-
-    // Проверка валидности email (после нормализации)
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(normalizedEmail)) {
-      toast.error(t("auth.invalidEmail"));
-      return;
-    }
-
-    // Проверка надежности пароля
-    const passwordValidation = validatePasswordStrength(password);
-    if (!passwordValidation.isValid) {
-      // Показываем первую ошибку
-      const firstError = passwordValidation.errors[0];
-      toast.error(firstError || t("auth.passwordWeak"));
-      return;
-    }
-
-    // Проверка совпадения паролей
-    if (password !== confirmPassword) {
-      toast.error(t("auth.passwordMismatch"));
-      return;
-    }
-
-    // Готовим имя: если не указано, используем часть email до @
-    const nameToSend = normalizedName || normalizedEmail.split("@")[0];
-
-    await createAdminMutation({
-      email: normalizedEmail,
-      name: nameToSend,
-      role: "admin",
-      password: normalizedPassword,
-    }).catch((error) => {
-      // Дополнительная обработка, если onError не сработал
-      // onError должен обработать, но на всякий случай показываем общую ошибку
-      if (!error?.handled) {
-        toast.error(error?.message || t("common.error"));
-      }
-    });
+    );
   };
 
   const handleEdit = () => {
-    if (!editAdmin) return;
-    
-    const { name, email, password, confirmPassword } = editAdmin;
-
-    // Проверка заполненности обязательных полей
-    if (!name.trim() || !email.trim()) {
-      toast.error(t("common.fillAllFields"));
-      return;
+    if (!editTarget) return;
+    const data: { name?: string; email?: string; role?: "admin" | "super_admin"; password?: string } = {
+      name: editForm.name,
+      email: editForm.email,
+      role: editForm.role,
+    };
+    if (editForm.password) {
+      if (editForm.password !== editForm.confirmPassword) { toast.error(t("auth.passwordMismatch")); return; }
+      const v = validatePasswordStrength(editForm.password);
+      if (!v.isValid) { toast.error(v.errors[0]); return; }
+      data.password = editForm.password;
     }
-
-    // Проверка валидности email
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      toast.error(t("auth.invalidEmail"));
-      return;
-    }
-
-    // Суперадмин может менять пароль без старого — только новый и подтверждение
-    if (password.trim()) {
-      const passwordValidation = validatePasswordStrength(password);
-      if (!passwordValidation.isValid) {
-        const firstError = passwordValidation.errors[0];
-        toast.error(firstError || t("auth.passwordWeak"));
-        return;
-      }
-      if (password !== confirmPassword) {
-        toast.error(t("auth.passwordMismatch"));
-        return;
-      }
-    }
-
-    const updateData: { name?: string; email?: string; password?: string } = { name };
-    if (email.trim()) updateData.email = email.trim().toLowerCase();
-    if (password.trim()) updateData.password = password;
-
-    updateAdminMutation.mutate({
-      id: editAdmin.id,
-      data: updateData,
+    updateAdmin({ id: editTarget.id, data }, {
+      onSuccess: () => {
+        toast.success(t("admin.adminUpdated") || "Admin updated");
+        queryClient.invalidateQueries({ queryKey: queryKeys.admins });
+        setIsEditOpen(false);
+      },
+      onError: (e: any) => toast.error(e.message || t("common.error")),
     });
   };
+
+  const handleDelete = () => {
+    if (!deleteTarget) return;
+    deleteAdmin(deleteTarget.id, {
+      onSuccess: () => {
+        toast.success(t("admin.adminDeleted") || "Admin deleted");
+        queryClient.invalidateQueries({ queryKey: queryKeys.admins });
+        setIsDeleteOpen(false);
+      },
+      onError: (e: any) => toast.error(e.message || t("common.error")),
+    });
+  };
+
+  const openEdit = (a: AdminUser) => {
+    setEditTarget(a);
+    setEditForm({ name: a.name || "", email: a.email, password: "", confirmPassword: "", role: (a.role as Role) || "admin" });
+    setIsEditOpen(true);
+  };
+
+  const openDelete = (a: AdminUser) => {
+    setDeleteTarget(a);
+    setIsDeleteOpen(true);
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <AdminHeader />
-      <div className="flex flex-col min-h-screen overflow-x-hidden">
-        {user?.role !== "super_admin" ? (
-          <div className="container px-4 sm:px-6 py-8">
-            <Card className="p-6 text-center">
-              <p className="text-sm text-muted-foreground">{t("admin.superAdminOnly")}</p>
-            </Card>
+      <main className="container py-6 space-y-6">
+
+        {/* Title */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b-4 border-foreground pb-4">
+          <div>
+            <h1 className="text-3xl font-black tracking-tight uppercase text-foreground">ADMINISTRATORS</h1>
+            <p className="text-xs font-mono text-muted-foreground mt-1 uppercase tracking-widest">
+              {admins.length} {t("admin.totalAdmins") || "admins"}
+            </p>
           </div>
-        ) : (
-          <>
-            <div className="container flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 sm:px-6 py-4 mb-4 sm:mb-6">
-              <h2 className="text-base sm:text-lg font-semibold text-foreground">{t("admin.admins")}</h2>
-              <Button onClick={() => setIsDialogOpen(true)} size="sm" className="w-full sm:w-auto">
-                <FiPlus className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">{t("admin.addAdmin")}</span>
-                <span className="sm:hidden">{t("common.add")}</span>
-              </Button>
+          {isSuperAdmin && (
+            <Button
+              onClick={() => setIsCreateOpen(true)}
+              className="rounded-none border-2 border-foreground bg-foreground text-background hover:bg-background hover:text-foreground font-black uppercase tracking-wider gap-2"
+            >
+              <FiPlus className="h-4 w-4" />
+              NEW ADMIN
+            </Button>
+          )}
+        </div>
+
+        {/* Table */}
+        <Card className="rounded-none border-2 border-foreground overflow-hidden">
+          {isLoading ? (
+            <div className="p-12 text-center font-mono uppercase tracking-widest text-muted-foreground text-xs">
+              {t("common.loading") || "LOADING..."}
             </div>
-            <main className="container flex-1 p-4 sm:p-6 space-y-4 sm:space-y-6 overflow-x-hidden">
-              {isLoading ? (
-                <div className="text-center py-12">
-                  <p className="text-muted-foreground">{t("common.loading")}</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {filteredAdmins.map((admin) => (
-                    <Card key={admin.id} className="p-6">
-                      <div className="flex items-start justify-between">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold">
-                              {admin.name.charAt(0)}
-                            </div>
-                            <div>
-                              <p className="font-semibold text-foreground">{admin.name}</p>
-                              <p className="text-sm text-muted-foreground">{admin.email}</p>
-                            </div>
+          ) : admins.length === 0 ? (
+            <div className="p-12 text-center font-mono uppercase tracking-widest text-muted-foreground text-xs">
+              {t("admin.noAdmins") || "NO ADMINISTRATORS"}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b-2 border-foreground bg-foreground/5">
+                    <th className="text-left px-4 py-3 font-black uppercase tracking-widest text-xs text-foreground">NAME</th>
+                    <th className="text-left px-4 py-3 font-black uppercase tracking-widest text-xs text-foreground">EMAIL</th>
+                    <th className="text-left px-4 py-3 font-black uppercase tracking-widest text-xs text-foreground">ROLE</th>
+                    <th className="text-left px-4 py-3 font-black uppercase tracking-widest text-xs text-foreground">CREATED</th>
+                    <th className="text-left px-4 py-3 font-black uppercase tracking-widest text-xs text-foreground">LAST LOGIN</th>
+                    {isSuperAdmin && (
+                      <th className="text-right px-4 py-3 font-black uppercase tracking-widest text-xs text-foreground">ACTIONS</th>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {admins.map((admin, i) => (
+                    <tr
+                      key={admin.id}
+                      className={`border-b border-border hover:bg-foreground/5 transition-colors ${i % 2 === 0 ? "" : "bg-foreground/[0.02]"}`}
+                    >
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <div className="h-8 w-8 flex-shrink-0 border-2 border-foreground/30 flex items-center justify-center bg-foreground/5">
+                            <span className="font-black font-mono text-xs text-foreground">
+                              {(admin.name || admin.email)[0].toUpperCase()}
+                            </span>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline">
-                              <FiShield className="h-3 w-3 mr-1" />
-                              {admin.role === "super_admin" ? t("admin.superAdmin") : t("admin.administrator")}
-                            </Badge>
-                          </div>
-                          <div className="text-sm text-muted-foreground">
-                            <p>{t("admin.created")}: {new Date(admin.createdAt).toLocaleDateString("ru-RU")}</p>
-                            {admin.lastLogin && (
-                              <p>{t("admin.lastLogin")}: {new Date(admin.lastLogin).toLocaleDateString("ru-RU")}</p>
+                          <span className="font-bold uppercase tracking-wide text-foreground text-xs">{admin.name || "—"}</span>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-xs text-muted-foreground">{admin.email}</span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={roleBadge(admin.role)}>
+                          {admin.role === "super_admin" ? "SUPER ADMIN" : "ADMIN"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {(admin as any).createdAt ? new Date((admin as any).createdAt).toLocaleDateString() : "—"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {(admin as any).lastLogin ? new Date((admin as any).lastLogin).toLocaleDateString() : "—"}
+                        </span>
+                      </td>
+                      {isSuperAdmin && (
+                        <td className="px-4 py-3 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => openEdit(admin)}
+                              className="rounded-none border border-foreground/30 hover:border-foreground h-7 w-7"
+                            >
+                              <FiEdit2 className="h-3.5 w-3.5" />
+                            </Button>
+                            {admin.id !== currentUser?.id && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => openDelete(admin)}
+                                className="rounded-none border border-red-500/30 hover:border-red-500 text-red-500 h-7 w-7"
+                              >
+                                <FiTrash2 className="h-3.5 w-3.5" />
+                              </Button>
                             )}
                           </div>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => {
-                              setEditAdmin({
-                                id: admin.id,
-                                name: admin.name,
-                                email: admin.email,
-                                password: "",
-                                confirmPassword: "",
-                              });
-                              setIsEditOpen(true);
-                            }}
-                          >
-                            <FiEdit2 className="h-4 w-4" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleDeleteClick(admin)}
-                            className="text-destructive"
-                          >
-                            <FiTrash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </Card>
+                        </td>
+                      )}
+                    </tr>
                   ))}
-                </div>
-              )}
-            </main>
-          </>
-        )}
-      </div>
-      {/* Add Admin Dialog */}
-      <Transition show={isDialogOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={() => setIsDialogOpen(false)}>
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-300"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-200"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-black/50" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center p-4">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-300"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-200"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-lg bg-card border border-border shadow-xl transition-all p-6">
-                  <Dialog.Title className="text-lg font-semibold text-foreground mb-4">
-                    {t("admin.addAdmin")}
-                  </Dialog.Title>
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      handleCreate();
-                    }}
-                    className="space-y-4"
-                  >
-                    <div>
-                      <Label>{t("admin.name")}</Label>
-                      <Input
-                        placeholder={t("admin.adminNamePlaceholder")}
-                        autoComplete="name"
-                        value={createAdminForm.name}
-                        onChange={(e) => setCreateAdminForm({ ...createAdminForm, name: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <Label>{t("auth.email")}</Label>
-                      <Input
-                        type="email"
-                        placeholder="admin@example.com"
-                        autoComplete="username"
-                        value={createAdminForm.email}
-                        onChange={(e) => setCreateAdminForm({ ...createAdminForm, email: e.target.value })}
-                      />
-                    </div>
-                    <div>
-                      <Label>{t("auth.password")}</Label>
-                      <div className="relative">
-                        <Input
-                          type={showPassword ? "text" : "password"}
-                          placeholder="********"
-                          autoComplete="new-password"
-                          value={createAdminForm.password}
-                          onChange={(e) => setCreateAdminForm({ ...createAdminForm, password: e.target.value })}
-                          className="pr-10"
-                          minLength={8}
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
-                          onClick={() => setShowPassword(!showPassword)}
-                        >
-                          {showPassword ? (
-                            <FiEyeOff className="h-4 w-4 text-muted-foreground" />
-                          ) : (
-                            <FiEye className="h-4 w-4 text-muted-foreground" />
-                          )}
-                        </Button>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {t("auth.passwordMinLength", { length: 8 }) || "Минимум 8 символов"}
-                      </p>
-                    </div>
-                    <div>
-                      <Label>{t("auth.confirmPassword")}</Label>
-                      <div className="relative">
-                        <Input
-                          type={showConfirmPassword ? "text" : "password"}
-                          placeholder="********"
-                          autoComplete="new-password"
-                          value={createAdminForm.confirmPassword}
-                          onChange={(e) => setCreateAdminForm({ ...createAdminForm, confirmPassword: e.target.value })}
-                          className="pr-10"
-                          minLength={8}
-                        />
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
-                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                        >
-                          {showConfirmPassword ? (
-                            <FiEyeOff className="h-4 w-4 text-muted-foreground" />
-                          ) : (
-                            <FiEye className="h-4 w-4 text-muted-foreground" />
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                    <Button
-                      type="submit"
-                      className="w-full"
-                      disabled={isCreating}
-                    >
-                      {isCreating ? t("common.loading") : t("common.create")}
-                    </Button>
-                  </form>
-                </Dialog.Panel>
-              </Transition.Child>
+                </tbody>
+              </table>
             </div>
-          </div>
-        </Dialog>
-      </Transition>
+          )}
+        </Card>
+      </main>
 
-      {/* Edit Admin Dialog */}
-      <Transition show={isEditOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={setIsEditOpen}>
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-300"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-200"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-black/50" />
+      {/* ── CREATE ADMIN DIALOG ── */}
+      <Transition show={isCreateOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setIsCreateOpen(false)}>
+          <Transition.Child as={Fragment} enter="ease-out duration-200" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-150" leaveFrom="opacity-100" leaveTo="opacity-0">
+            <div className="fixed inset-0 bg-black/60" />
           </Transition.Child>
           <div className="fixed inset-0 overflow-y-auto">
             <div className="flex min-h-full items-center justify-center p-4">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-300"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-200"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-lg bg-card border border-border shadow-xl transition-all duration-300 ease-out p-6">
-                  <Dialog.Title className="text-lg font-semibold text-foreground mb-4">
-                    {t("common.edit")}
+              <Transition.Child as={Fragment} enter="ease-out duration-200" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-150" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+                <Dialog.Panel className="w-full max-w-md bg-card border-2 border-foreground p-6 space-y-5">
+                  <Dialog.Title className="text-xl font-black uppercase tracking-widest text-foreground border-b-2 border-foreground pb-3">
+                    NEW ADMINISTRATOR
                   </Dialog.Title>
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      handleEdit();
-                    }}
-                    className="space-y-4"
-                  >
-                    <div>
-                      <Label>{t("admin.name")}</Label>
-                      <Input
-                        placeholder={t("admin.adminNamePlaceholder")}
-                        autoComplete="name"
-                        value={editAdmin?.name || ""}
-                        onChange={(e) => setEditAdmin((prev) => prev ? { ...prev, name: e.target.value } : prev)}
-                      />
-                    </div>
-                    <div>
-                      <Label>{t("auth.email")}</Label>
-                      <Input
-                        type="email"
-                        placeholder="admin@example.com"
-                        autoComplete="username"
-                        value={editAdmin?.email || ""}
-                        onChange={(e) => setEditAdmin((prev) => prev ? { ...prev, email: e.target.value } : prev)}
-                      />
-                    </div>
-                    <div className="space-y-3">
-                      {!showEditPasswordSection ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="w-full"
-                          onClick={() => setShowEditPasswordSection(true)}
-                        >
-                          {t("admin.changePasswordExpand")}
-                        </Button>
-                      ) : (
-                        <Transition
-                          show={showEditPasswordSection}
-                          as="div"
-                          enter="ease-out duration-300"
-                          enterFrom="opacity-0 -translate-y-2"
-                          enterTo="opacity-100 translate-y-0"
-                          leave="ease-in duration-200"
-                          leaveFrom="opacity-100 translate-y-0"
-                          leaveTo="opacity-0 -translate-y-2"
-                          className="space-y-4"
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm font-medium text-foreground">{t("admin.changePasswordExpand")}</span>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="text-muted-foreground h-auto py-1"
-                              onClick={() => {
-                                setShowEditPasswordSection(false);
-                                setEditAdmin((prev) => prev ? { ...prev, password: "", confirmPassword: "" } : prev);
-                              }}
-                            >
-                              {t("admin.hidePasswordFields")}
-                            </Button>
-                          </div>
-                          <div>
-                            <Label>{t("auth.newPassword")}</Label>
-                            <div className="relative mt-1">
-                              <Input
-                                type={showEditPassword ? "text" : "password"}
-                                placeholder={t("admin.enterNewPasswordToChange")}
-                                autoComplete="new-password"
-                                value={editAdmin?.password || ""}
-                                onChange={(e) => setEditAdmin((prev) => prev ? { ...prev, password: e.target.value } : prev)}
-                                className="pr-10"
-                                minLength={8}
-                              />
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
-                                onClick={() => setShowEditPassword(!showEditPassword)}
-                              >
-                                {showEditPassword ? (
-                                  <FiEyeOff className="h-4 w-4 text-muted-foreground" />
-                                ) : (
-                                  <FiEye className="h-4 w-4 text-muted-foreground" />
-                                )}
-                              </Button>
-                            </div>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              {t("auth.passwordMinLength", { length: 8 }) || "Минимум 8 символов"}
-                            </p>
-                          </div>
-                          <div>
-                            <Label>{t("auth.confirmPassword")}</Label>
-                            <div className="relative mt-1">
-                              <Input
-                                type={showEditConfirmPassword ? "text" : "password"}
-                                placeholder={t("auth.confirmPassword")}
-                                autoComplete="new-password"
-                                value={editAdmin?.confirmPassword || ""}
-                                onChange={(e) => setEditAdmin((prev) => prev ? { ...prev, confirmPassword: e.target.value } : prev)}
-                                className="pr-10"
-                                minLength={8}
-                              />
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
-                                onClick={() => setShowEditConfirmPassword(!showEditConfirmPassword)}
-                              >
-                                {showEditConfirmPassword ? (
-                                  <FiEyeOff className="h-4 w-4 text-muted-foreground" />
-                                ) : (
-                                  <FiEye className="h-4 w-4 text-muted-foreground" />
-                                )}
-                              </Button>
-                            </div>
-                          </div>
-                        </Transition>
-                      )}
-                    </div>
-                    <div className="flex gap-3">
-                      <Button type="button" variant="outline" className="flex-1" onClick={() => setIsEditOpen(false)}>
-                        {t("common.cancel")}
-                      </Button>
-                      <Button type="submit" className="flex-1" disabled={!editAdmin}>
-                        {t("common.save")}
-                      </Button>
-                    </div>
-                  </form>
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
-
-      {/* Delete Confirmation Dialog */}
-      <Transition show={isDeleteDialogOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={handleDeleteCancel}>
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-300"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-200"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-black/50" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center p-4">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-300"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-200"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-lg bg-card border border-border shadow-xl transition-all p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="flex-shrink-0 w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center">
-                      <FiAlertTriangle className="h-5 w-5 text-destructive" />
-                    </div>
-                    <Dialog.Title className="text-lg font-semibold text-foreground">
-                      {t("admin.confirmDelete") || "Подтвердите удаление"}
-                    </Dialog.Title>
-                  </div>
                   <div className="space-y-4">
-                    <p className="text-sm text-muted-foreground">
-                      {adminToDelete && (
-                        <>
-                          {t("admin.deleteAdminWarning", { 
-                            name: adminToDelete.name, 
-                            email: adminToDelete.email 
-                          }) || `Вы уверены, что хотите удалить администратора "${adminToDelete.name}" (${adminToDelete.email})? Это действие нельзя отменить.`}
-                        </>
-                      )}
-                    </p>
-                    <div className="flex gap-3">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="flex-1"
-                        onClick={handleDeleteCancel}
-                      >
-                        {t("common.cancel")}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        className="flex-1"
-                        onClick={handleDeleteConfirm}
-                        disabled={deleteAdminMutation.isPending}
-                      >
-                        {deleteAdminMutation.isPending ? t("common.loading") : (t("common.delete") || "Удалить")}
-                      </Button>
+                    <div className="space-y-1.5">
+                      <Label className="font-mono uppercase text-xs tracking-widest">NAME</Label>
+                      <Input value={createForm.name} onChange={(e) => setCreateForm({ ...createForm, name: e.target.value })} className="rounded-none border-2 border-foreground font-mono" placeholder="John Doe" />
                     </div>
+                    <div className="space-y-1.5">
+                      <Label className="font-mono uppercase text-xs tracking-widest">EMAIL</Label>
+                      <Input type="email" value={createForm.email} onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })} className="rounded-none border-2 border-foreground font-mono" placeholder="admin@sayless.kz" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="font-mono uppercase text-xs tracking-widest">ROLE</Label>
+                      <Select value={createForm.role} onValueChange={(v) => setCreateForm({ ...createForm, role: v as Role })}>
+                        <SelectTrigger className="rounded-none border-2 border-foreground font-mono uppercase text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-none border-2 border-foreground">
+                          <SelectItem value="admin" className="font-mono uppercase text-xs">ADMIN</SelectItem>
+                          <SelectItem value="super_admin" className="font-mono uppercase text-xs">SUPER ADMIN</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <Label className="font-mono uppercase text-xs tracking-widest">PASSWORD</Label>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const pwd = generatePassword();
+                            setCreateForm({ ...createForm, password: pwd, confirmPassword: pwd });
+                          }}
+                          className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
+                        >
+                          <FiRefreshCw className="h-3 w-3" /> AUTO-GENERATE
+                        </button>
+                      </div>
+                      <div className="relative">
+                        <Input type={showCreatePwd ? "text" : "password"} value={createForm.password} onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })} className="rounded-none border-2 border-foreground font-mono pr-10" autoComplete="new-password" />
+                        <button type="button" onClick={() => setShowCreatePwd(!showCreatePwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                          {showCreatePwd ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="font-mono uppercase text-xs tracking-widest">CONFIRM PASSWORD</Label>
+                      <div className="relative">
+                        <Input type={showCreateConfirm ? "text" : "password"} value={createForm.confirmPassword} onChange={(e) => setCreateForm({ ...createForm, confirmPassword: e.target.value })} className="rounded-none border-2 border-foreground font-mono pr-10" autoComplete="new-password" />
+                        <button type="button" onClick={() => setShowCreateConfirm(!showCreateConfirm)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                          {showCreateConfirm ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 pt-2">
+                    <Button variant="outline" className="flex-1 rounded-none border-2 border-foreground font-black uppercase tracking-wider" onClick={() => setIsCreateOpen(false)}>CANCEL</Button>
+                    <Button disabled={isCreating} onClick={handleCreate} className="flex-1 rounded-none border-2 border-foreground bg-foreground text-background hover:bg-background hover:text-foreground font-black uppercase tracking-wider">
+                      {isCreating ? "CREATING..." : "CREATE"}
+                    </Button>
                   </div>
                 </Dialog.Panel>
               </Transition.Child>
@@ -877,7 +355,100 @@ const AdminAdmins = () => {
           </div>
         </Dialog>
       </Transition>
+
+      {/* ── EDIT ADMIN DIALOG ── */}
+      <Transition show={isEditOpen} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={() => setIsEditOpen(false)}>
+          <Transition.Child as={Fragment} enter="ease-out duration-200" enterFrom="opacity-0" enterTo="opacity-100" leave="ease-in duration-150" leaveFrom="opacity-100" leaveTo="opacity-0">
+            <div className="fixed inset-0 bg-black/60" />
+          </Transition.Child>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center p-4">
+              <Transition.Child as={Fragment} enter="ease-out duration-200" enterFrom="opacity-0 scale-95" enterTo="opacity-100 scale-100" leave="ease-in duration-150" leaveFrom="opacity-100 scale-100" leaveTo="opacity-0 scale-95">
+                <Dialog.Panel className="w-full max-w-md bg-card border-2 border-foreground p-6 space-y-5">
+                  <Dialog.Title className="text-xl font-black uppercase tracking-widest text-foreground border-b-2 border-foreground pb-3">
+                    EDIT ADMIN
+                  </Dialog.Title>
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label className="font-mono uppercase text-xs tracking-widest">NAME</Label>
+                      <Input value={editForm.name} onChange={(e) => setEditForm({ ...editForm, name: e.target.value })} className="rounded-none border-2 border-foreground font-mono" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="font-mono uppercase text-xs tracking-widest">EMAIL</Label>
+                      <Input type="email" value={editForm.email} onChange={(e) => setEditForm({ ...editForm, email: e.target.value })} className="rounded-none border-2 border-foreground font-mono" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="font-mono uppercase text-xs tracking-widest">ROLE</Label>
+                      <Select value={editForm.role} onValueChange={(v) => setEditForm({ ...editForm, role: v as Role })}>
+                        <SelectTrigger className="rounded-none border-2 border-foreground font-mono uppercase text-xs">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-none border-2 border-foreground">
+                          <SelectItem value="admin" className="font-mono uppercase text-xs">ADMIN</SelectItem>
+                          <SelectItem value="super_admin" className="font-mono uppercase text-xs">SUPER ADMIN</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="border-t border-foreground/20 pt-4 space-y-1">
+                      <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">LEAVE PASSWORD BLANK TO KEEP UNCHANGED</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="font-mono uppercase text-xs tracking-widest">NEW PASSWORD</Label>
+                      <div className="relative">
+                        <Input type={showEditPwd ? "text" : "password"} value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} className="rounded-none border-2 border-foreground font-mono pr-10" autoComplete="new-password" />
+                        <button type="button" onClick={() => setShowEditPwd(!showEditPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                          {showEditPwd ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="font-mono uppercase text-xs tracking-widest">CONFIRM PASSWORD</Label>
+                      <div className="relative">
+                        <Input type={showEditConfirm ? "text" : "password"} value={editForm.confirmPassword} onChange={(e) => setEditForm({ ...editForm, confirmPassword: e.target.value })} className="rounded-none border-2 border-foreground font-mono pr-10" autoComplete="new-password" />
+                        <button type="button" onClick={() => setShowEditConfirm(!showEditConfirm)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                          {showEditConfirm ? <FiEyeOff className="h-4 w-4" /> : <FiEye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 pt-2">
+                    <Button variant="outline" className="flex-1 rounded-none border-2 border-foreground font-black uppercase tracking-wider" onClick={() => setIsEditOpen(false)}>CANCEL</Button>
+                    <Button disabled={isUpdating} onClick={handleEdit} className="flex-1 rounded-none border-2 border-foreground bg-foreground text-background hover:bg-background hover:text-foreground font-black uppercase tracking-wider">
+                      {isUpdating ? "SAVING..." : "SAVE"}
+                    </Button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
+
+      {/* ── DELETE CONFIRMATION ── */}
+      <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <AlertDialogContent className="rounded-none border-2 border-red-500 bg-card">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-black uppercase tracking-widest text-foreground">DELETE ADMIN</AlertDialogTitle>
+            <AlertDialogDescription className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
+              Remove administrator{" "}
+              <span className="font-bold text-foreground">{deleteTarget?.name || deleteTarget?.email}</span>? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="rounded-none border-2 border-foreground font-black uppercase tracking-wider">CANCEL</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={isDeleting}
+              className="rounded-none border-2 border-red-500 bg-red-500 text-white hover:bg-background hover:text-red-500 font-black uppercase tracking-wider"
+            >
+              {isDeleting ? "DELETING..." : "DELETE"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
+
 export default AdminAdmins;

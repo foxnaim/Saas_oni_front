@@ -1,12 +1,9 @@
 'use client';
 
-import { useState, Fragment, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Dialog, Transition, Listbox } from "@headlessui/react";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,404 +14,698 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { FiSearch, FiEye, FiCheckCircle, FiX, FiChevronDown, FiCheck, FiTrash2, FiChevronLeft, FiChevronRight } from "react-icons/fi";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  FiSearch,
+  FiEye,
+  FiCheckCircle,
+  FiX,
+  FiTrash2,
+  FiChevronLeft,
+  FiChevronRight,
+  FiRefreshCw,
+} from "react-icons/fi";
 import { AdminHeader } from "@/components/AdminHeader";
 import { useMessages, useDeleteMessage } from "@/lib/query";
 import { messageService } from "@/lib/query/services";
-import { Message, MessageStatus } from "@/types";
+import { Message } from "@/types";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { MESSAGE_STATUSES, PAGINATION } from "@/lib/utils/constants";
 import { useSocketMessages } from "@/lib/websocket/useSocket";
 
+/* ─── helpers ──────────────────────────────────────────────────────────── */
+const fmtDate = (d: string | Date | undefined): string => {
+  if (!d) return "—";
+  const date = typeof d === "string" ? new Date(d) : d;
+  if (isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+/* ─── status colour map ────────────────────────────────────────────────── */
+const STATUS_STYLES: Record<string, { bg: string; text: string; border: string }> = {
+  [MESSAGE_STATUSES.NEW]:         { bg: "#FF3D00",  text: "#FFFFFF", border: "#FF3D00" },
+  [MESSAGE_STATUSES.IN_PROGRESS]: { bg: "#1A1A1A",  text: "#CCFF00", border: "#CCFF00" },
+  [MESSAGE_STATUSES.RESOLVED]:    { bg: "#CCFF00",  text: "#0A0A0A", border: "#CCFF00" },
+  [MESSAGE_STATUSES.REJECTED]:    { bg: "#71717A",  text: "#FFFFFF", border: "#71717A" },
+  [MESSAGE_STATUSES.SPAM]:        { bg: "#FF3D00",  text: "#0A0A0A", border: "#FF3D00" },
+};
+
+function StatusPill({ status, label }: { status: string; label: string }) {
+  const s = STATUS_STYLES[status] ?? { bg: "#71717A", text: "#FFF", border: "#71717A" };
+  return (
+    <span
+      className="inline-block px-2 py-0.5 text-[10px] font-mono font-black uppercase tracking-widest border"
+      style={{ background: s.bg, color: s.text, borderColor: s.border }}
+    >
+      {label}
+    </span>
+  );
+}
+
+/* ─── TH / TD helpers ──────────────────────────────────────────────────── */
+function Th({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <th
+      className={cn(
+        "px-3 py-2.5 text-left text-[10px] font-mono font-black uppercase tracking-widest text-background whitespace-nowrap",
+        className
+      )}
+    >
+      {children}
+    </th>
+  );
+}
+function Td({ children, className = "" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <td className={cn("px-3 py-3 align-top text-xs font-mono text-foreground", className)}>
+      {children}
+    </td>
+  );
+}
+
+/* ─── View / moderation modal ──────────────────────────────────────────── */
+interface ViewModalProps {
+  message: Message | null;
+  open: boolean;
+  onClose: () => void;
+  onApprove: () => void;
+  onReject: () => void;
+  onDeleteRequest: () => void;
+  translateStatus: (s: string) => string;
+  getTypeLabel: (s: string) => string;
+}
+function ViewModal({
+  message,
+  open,
+  onClose,
+  onApprove,
+  onReject,
+  onDeleteRequest,
+  translateStatus,
+  getTypeLabel,
+}: ViewModalProps) {
+  const { t } = useTranslation();
+  if (!open || !message) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/80" onClick={onClose} />
+      <div className="relative w-full max-w-2xl bg-card border-2 border-foreground shadow-brutal overflow-y-auto max-h-[90vh]">
+        {/* Modal header */}
+        <div className="flex items-center justify-between px-5 py-3 bg-foreground">
+          <span className="text-xs font-mono font-black uppercase tracking-widest text-background">
+            {t("admin.messageModeration").toUpperCase()}
+          </span>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 flex items-center justify-center bg-background text-foreground hover:bg-primary hover:text-primary-foreground transition-colors"
+          >
+            <FiX className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* Meta grid */}
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3 border-2 border-foreground p-4">
+            {[
+              { label: "ID", value: <code className="text-[10px] break-all">{message.id}</code> },
+              { label: t("admin.companyName").toUpperCase(), value: message.companyCode },
+              { label: t("messages.type").toUpperCase(), value: getTypeLabel(message.type) },
+              {
+                label: t("checkStatus.status").toUpperCase(),
+                value: <StatusPill status={message.status} label={translateStatus(message.status)} />,
+              },
+              { label: "CREATED", value: fmtDate(String(message.createdAt ?? "")) },
+            ].map(({ label, value }) => (
+              <div key={label} className="space-y-0.5">
+                <p className="text-[9px] font-mono font-black uppercase tracking-widest text-muted-foreground">
+                  {label}
+                </p>
+                <div className="text-xs font-mono text-foreground break-all">{value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Content */}
+          <div className="space-y-1">
+            <p className="text-[9px] font-mono font-black uppercase tracking-widest text-muted-foreground">
+              {t("sendMessage.message").toUpperCase()}
+            </p>
+            <div className="border-2 border-foreground p-4 bg-background">
+              <p className="text-sm font-mono text-foreground whitespace-pre-wrap break-words">
+                {message.content}
+              </p>
+            </div>
+          </div>
+
+          {/* Company response */}
+          {message.companyResponse && (
+            <div className="space-y-1">
+              <p className="text-[9px] font-mono font-black uppercase tracking-widest text-muted-foreground">
+                {t("checkStatus.companyResponse").toUpperCase()}
+              </p>
+              <div className="border-2 border-primary p-4 bg-background">
+                <p className="text-sm font-mono text-foreground whitespace-pre-wrap break-words">
+                  {message.companyResponse}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t-2 border-foreground">
+            <button
+              onClick={onApprove}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground border-2 border-foreground font-mono font-black text-xs uppercase tracking-wide shadow-brutal hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+            >
+              <FiCheckCircle className="w-4 h-4" />
+              {t("admin.approve").toUpperCase()}
+            </button>
+            <button
+              onClick={onReject}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-background text-foreground border-2 border-foreground font-mono font-black text-xs uppercase tracking-wide shadow-brutal hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+            >
+              <FiX className="w-4 h-4" />
+              {t("admin.reject").toUpperCase()}
+            </button>
+            <button
+              onClick={onDeleteRequest}
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-destructive text-destructive-foreground border-2 border-destructive font-mono font-black text-xs uppercase tracking-wide shadow-brutal-danger hover:translate-x-[2px] hover:translate-y-[2px] hover:shadow-none transition-all"
+            >
+              <FiTrash2 className="w-4 h-4" />
+              {t("admin.deleteMessage").toUpperCase()}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── AdminMessages ──────────────────────────────────────────────────────── */
 const AdminMessages = () => {
   const { t } = useTranslation();
-  const [searchQuery, setSearchQuery] = useState("");
+
+  const [searchQuery, setSearchQuery]   = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [currentPage, setCurrentPage] = useState(1);
+  const [typeFilter, setTypeFilter]     = useState<string>("all");
+  const [currentPage, setCurrentPage]   = useState(1);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const { data: messagesResult, isLoading, refetch } = useMessages(undefined, currentPage, PAGINATION.MESSAGES_PAGE_SIZE);
-  const messages = messagesResult?.data ?? [];
+  const [isViewOpen, setIsViewOpen]     = useState(false);
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [selectedIds, setSelectedIds]   = useState<Set<string>>(new Set());
+
+  const { data: messagesResult, isLoading, refetch } = useMessages(
+    undefined,
+    currentPage,
+    PAGINATION.MESSAGES_PAGE_SIZE
+  );
+  const messages   = messagesResult?.data ?? [];
   const pagination = messagesResult?.pagination;
-  
-  // Подключаемся к WebSocket для real-time обновлений
+
   useSocketMessages();
 
-  // Хук для удаления сообщения с оптимистичными обновлениями
   const deleteMessageMutation = useDeleteMessage({
     onMutate: () => {
-      // Закрываем диалог сразу при оптимистичном обновлении
-      setIsDeleteDialogOpen(false);
-      setIsDialogOpen(false);
+      setIsDeleteOpen(false);
+      setIsViewOpen(false);
     },
-    onSuccess: () => {
-      toast.success(t("admin.messageDeleted"));
-    },
+    onSuccess: () => toast.success(t("admin.messageDeleted")),
     onError: (error) => {
-      const errorStatus = (error as any)?.status || (error as any)?.response?.status;
-      if (errorStatus === 404) {
-        // Если 404, значит сообщение уже удалено - считаем успехом
-        toast.info(t("admin.messageNotFound") || "Сообщение уже было удалено");
-      } else {
-        toast.error(t("admin.deleteMessageError"));
-      }
+      const status = (error as any)?.status ?? (error as any)?.response?.status;
+      if (status === 404) toast.info(t("admin.messageNotFound") || "Already deleted");
+      else toast.error(t("admin.deleteMessageError"));
     },
   });
-  
-  // Функция для нормализации статуса: переводит переведенное значение в значение из БД
-  const normalizeStatus = (status: string): string => {
-    if (status === "all") return "all";
-    // Создаем маппинг переведенных значений на значения из БД
-    const statusMap: Record<string, string> = {
-      [t("checkStatus.new")]: MESSAGE_STATUSES.NEW,
-      [t("checkStatus.inProgress")]: MESSAGE_STATUSES.IN_PROGRESS,
-      [t("checkStatus.resolved")]: MESSAGE_STATUSES.RESOLVED,
-      [t("checkStatus.rejected")]: MESSAGE_STATUSES.REJECTED,
-      [t("checkStatus.spam")]: MESSAGE_STATUSES.SPAM,
-    };
-    return statusMap[status] || status;
-  };
-  
-  const getTypeLabel = (type: string) => {
-    switch (type) {
-      case "complaint":
-        return t("sendMessage.complaint");
-      case "praise":
-        return t("sendMessage.praise");
-      case "suggestion":
-        return t("sendMessage.suggestion");
-      default:
-        return type;
-    }
-  };
-  
-  // Функция для перевода статуса из БД в переведенное значение
-  const translateStatus = (status: string): string => {
-    // MESSAGE_STATUSES уже содержат русские строки, поэтому используем их напрямую
-    const statusMap: Record<string, string> = {
-      [MESSAGE_STATUSES.NEW]: t("checkStatus.new"),
-      [MESSAGE_STATUSES.IN_PROGRESS]: t("checkStatus.inProgress"),
-      [MESSAGE_STATUSES.RESOLVED]: t("checkStatus.resolved"),
-      [MESSAGE_STATUSES.REJECTED]: t("checkStatus.rejected"),
-      [MESSAGE_STATUSES.SPAM]: t("checkStatus.spam"),
-    };
-    return statusMap[status] || status;
-  };
-  
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter]);
 
-  const filteredMessages = messages.filter((msg) => {
-    const matchesSearch = msg.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      msg.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      msg.companyCode.toLowerCase().includes(searchQuery.toLowerCase());
-    const normalizedStatus = normalizeStatus(statusFilter);
-    const matchesStatus = normalizedStatus === "all" || msg.status === normalizedStatus;
-    return matchesSearch && matchesStatus;
+  /* ── status/type helpers ── */
+  const normalizeStatus = useCallback(
+    (s: string): string => {
+      if (s === "all") return "all";
+      const map: Record<string, string> = {
+        [t("checkStatus.new")]:        MESSAGE_STATUSES.NEW,
+        [t("checkStatus.inProgress")]: MESSAGE_STATUSES.IN_PROGRESS,
+        [t("checkStatus.resolved")]:   MESSAGE_STATUSES.RESOLVED,
+        [t("checkStatus.rejected")]:   MESSAGE_STATUSES.REJECTED,
+        [t("checkStatus.spam")]:       MESSAGE_STATUSES.SPAM,
+      };
+      return map[s] ?? s;
+    },
+    [t]
+  );
+
+  const translateStatus = useCallback(
+    (s: string): string => {
+      const map: Record<string, string> = {
+        [MESSAGE_STATUSES.NEW]:         t("checkStatus.new"),
+        [MESSAGE_STATUSES.IN_PROGRESS]: t("checkStatus.inProgress"),
+        [MESSAGE_STATUSES.RESOLVED]:    t("checkStatus.resolved"),
+        [MESSAGE_STATUSES.REJECTED]:    t("checkStatus.rejected"),
+        [MESSAGE_STATUSES.SPAM]:        t("checkStatus.spam"),
+      };
+      return map[s] ?? s;
+    },
+    [t]
+  );
+
+  const getTypeLabel = useCallback(
+    (type: string) => {
+      const map: Record<string, string> = {
+        complaint:  t("sendMessage.complaint"),
+        praise:     t("sendMessage.praise"),
+        suggestion: t("sendMessage.suggestion"),
+      };
+      return map[type] ?? type;
+    },
+    [t]
+  );
+
+  useEffect(() => { setCurrentPage(1); }, [searchQuery, statusFilter, typeFilter]);
+
+  /* ── filtering ── */
+  const filtered = messages.filter((msg) => {
+    const q = searchQuery.toLowerCase();
+    const matchSearch =
+      msg.content.toLowerCase().includes(q) ||
+      msg.id.toLowerCase().includes(q) ||
+      msg.companyCode.toLowerCase().includes(q);
+    const normStatus  = normalizeStatus(statusFilter);
+    const matchStatus = normStatus === "all" || msg.status === normStatus;
+    const matchType   = typeFilter === "all" || msg.type === typeFilter;
+    return matchSearch && matchStatus && matchType;
   });
 
-  const handleViewMessage = (message: Message) => {
-    setSelectedMessage(message);
-    setIsDialogOpen(true);
+  /* ── bulk selection ── */
+  const allSelected = filtered.length > 0 && filtered.every((m) => selectedIds.has(m.id));
+  const toggleAll   = () => {
+    if (allSelected) setSelectedIds(new Set());
+    else setSelectedIds(new Set(filtered.map((m) => m.id)));
+  };
+  const toggleOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  /* ── handlers ── */
+  const handleView = (msg: Message) => {
+    setSelectedMessage(msg);
+    setIsViewOpen(true);
   };
 
   const handleModerate = async (action: "approve" | "reject") => {
     if (!selectedMessage) return;
     try {
       await messageService.moderate(selectedMessage.id, action);
-      toast.success(action === "approve" ? t("admin.messageApproved") : t("admin.messageRejected"));
-      setIsDialogOpen(false);
+      toast.success(
+        action === "approve" ? t("admin.messageApproved") : t("admin.messageRejected")
+      );
+      setIsViewOpen(false);
       refetch();
-    } catch (error) {
+    } catch {
       toast.error(t("admin.moderationError"));
     }
   };
 
-  const handleDeleteClick = () => {
-    setIsDeleteDialogOpen(true);
-  };
-
   const handleDeleteConfirm = () => {
     if (!selectedMessage) return;
-    // Используем хук с оптимистичными обновлениями
     deleteMessageMutation.mutate({
       id: selectedMessage.id,
       companyCode: selectedMessage.companyCode,
     });
   };
 
-  const getStatusColor = (status: MessageStatus) => {
-    // Используем константы для сравнения, так как статусы приходят с бэкенда на русском
-    switch (status) {
-      case MESSAGE_STATUSES.NEW:
-      case "Новое":
-        return "bg-accent text-accent-foreground";
-      case MESSAGE_STATUSES.IN_PROGRESS:
-      case "В работе":
-        return "bg-secondary text-secondary-foreground";
-      case MESSAGE_STATUSES.RESOLVED:
-      case "Решено":
-        return "bg-success text-success-foreground";
-      case MESSAGE_STATUSES.REJECTED:
-      case "Отклонено":
-        return "bg-muted text-muted-foreground";
-      case MESSAGE_STATUSES.SPAM:
-      case "Спам":
-        return "bg-destructive text-destructive-foreground";
-      default:
-        return "bg-muted text-muted-foreground";
-    }
-  };
+  /* ── option lists ── */
+  const STATUS_OPTIONS = [
+    { value: "all",                         label: t("messages.allStatuses") },
+    { value: t("checkStatus.new"),          label: t("checkStatus.new") },
+    { value: t("checkStatus.inProgress"),   label: t("checkStatus.inProgress") },
+    { value: t("checkStatus.resolved"),     label: t("checkStatus.resolved") },
+    { value: t("checkStatus.rejected"),     label: t("checkStatus.rejected") },
+    { value: t("checkStatus.spam"),         label: t("checkStatus.spam") },
+  ];
+  const TYPE_OPTIONS = [
+    { value: "all",         label: t("messages.allTypes") || "ALL TYPES" },
+    { value: "complaint",   label: t("sendMessage.complaint") },
+    { value: "praise",      label: t("sendMessage.praise") },
+    { value: "suggestion",  label: t("sendMessage.suggestion") },
+  ];
+
+  /* ── max page buttons to show ── */
+  const totalPages = pagination?.totalPages ?? 1;
+  const pageButtons = Array.from(
+    { length: Math.min(totalPages, 7) },
+    (_, i) => i + 1
+  );
 
   return (
     <div className="min-h-screen bg-background">
       <AdminHeader />
-      <div className="flex flex-col min-h-screen overflow-x-hidden">
-        <main className="container flex-1 p-4 sm:p-6 space-y-4 sm:space-y-6">
-          <Card className="p-4 sm:p-6">
-            <div className="flex flex-col md:flex-row gap-3 sm:gap-4">
-              <div className="relative flex-1">
-                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder={t("admin.searchMessages")}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 text-sm sm:text-base"
-                  autoComplete="off"
-                />
-              </div>
-              <Listbox value={statusFilter} onChange={setStatusFilter}>
-                <div className="relative w-full md:w-[180px]">
-                  <Listbox.Button className="relative w-full cursor-default rounded-md border border-input bg-background py-2 pl-3 pr-10 text-left shadow-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 sm:text-sm">
-                    <span className="block truncate">
-                      {statusFilter === "all" ? t("messages.allStatuses") : statusFilter}
-                    </span>
-                    <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-2">
-                      <FiChevronDown className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                    </span>
-                  </Listbox.Button>
-                  <Transition
-                    as={Fragment}
-                    leave="transition ease-in duration-100"
-                    leaveFrom="opacity-100"
-                    leaveTo="opacity-0"
-                  >
-                    <Listbox.Options className="absolute z-10 mt-1 max-h-60 w-full overflow-auto rounded-md bg-card border border-border py-1 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none sm:text-sm">
-                      {["all", t("checkStatus.new"), t("checkStatus.inProgress"), t("checkStatus.resolved"), t("checkStatus.spam")].map((status) => (
-                        <Listbox.Option
-                          key={status}
-                          className={({ active }) =>
-                            cn(
-                              "relative cursor-default select-none py-2 pl-10 pr-4",
-                              active ? "bg-primary/10 text-primary" : "text-foreground"
-                            )
-                          }
-                          value={status}
-                        >
-                          {({ selected }) => (
-                            <>
-                              <span className={cn("block truncate", selected ? "font-medium" : "font-normal")}>
-                                {status === "all" ? t("messages.allStatuses") : status}
-                              </span>
-                              {selected ? (
-                                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-primary">
-                                  <FiCheck className="h-4 w-4" aria-hidden="true" />
-                                </span>
-                              ) : null}
-                            </>
-                          )}
-                        </Listbox.Option>
-                      ))}
-                    </Listbox.Options>
-                  </Transition>
-                </div>
-              </Listbox>
+
+      <main className="container px-4 sm:px-6 py-6 sm:py-10 space-y-6">
+
+        {/* ── Title ── */}
+        <div className="border-b-2 border-foreground pb-4">
+          <h1 className="text-4xl sm:text-6xl font-black uppercase tracking-tight text-brutal text-foreground">
+            MODERATION
+          </h1>
+          <p className="text-xs font-mono text-muted-foreground mt-1 uppercase tracking-widest">
+            ALL MESSAGES — ALL COMPANIES
+          </p>
+        </div>
+
+        {/* ── Filters toolbar ── */}
+        <div className="border-2 border-foreground bg-card p-4 shadow-brutal">
+          <div className="flex flex-wrap gap-3 items-end">
+            {/* Search */}
+            <div className="relative flex-1 min-w-[200px]">
+              <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                placeholder={t("admin.searchMessages")}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 font-mono text-xs border-2 border-foreground bg-background"
+                autoComplete="off"
+              />
             </div>
-          </Card>
-          {isLoading ? (
-            <div className="text-center py-12">
-              <p className="text-muted-foreground">{t("common.loading")}</p>
+
+            {/* Status filter */}
+            <div className="w-40">
+              <p className="text-[9px] font-mono font-black uppercase tracking-widest text-muted-foreground mb-1">
+                STATUS
+              </p>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="font-mono text-xs border-2 border-foreground bg-background h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="border-2 border-foreground">
+                  {STATUS_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value} className="font-mono text-xs">
+                      {o.label.toUpperCase()}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-          ) : (
-            <>
-              <div className="text-sm text-muted-foreground px-2">
-                {t("messages.found")}: {filteredMessages.length} {filteredMessages.length === 1 ? t("messages.message") : t("messages.messages")} {messages.length !== filteredMessages.length && `(${messages.length} ${t("messages.total")})`}
-                {pagination?.total != null && ` — ${currentPage} ${t("company.of")} ${pagination.totalPages}`}
-              </div>
-              <div className="space-y-3 sm:space-y-4">
-                {filteredMessages.length === 0 ? (
-                  <Card className="p-12 text-center">
-                    <p className="text-muted-foreground">{t("messages.noMessagesFound")}</p>
-                  </Card>
-                ) : (
-                  filteredMessages.map((message) => (
-                <Card key={message.id} className="p-4 sm:p-6">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-start justify-between gap-3 sm:gap-4">
-                    <div className="flex-1 space-y-2 sm:space-y-3 w-full min-w-0">
-                      <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                        <code className="text-xs sm:text-sm font-mono text-primary break-all">{message.id}</code>
-                        <Badge variant="outline" className="text-xs whitespace-nowrap">{message.companyCode}</Badge>
-                        <Badge className="text-xs whitespace-nowrap">{translateStatus(message.status)}</Badge>
-                      </div>
-                      <p className="text-sm sm:text-base text-foreground break-words whitespace-pre-wrap overflow-wrap-anywhere">
-                        {message.content}
-                      </p>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleViewMessage(message)}
-                      className="w-full sm:w-auto sm:flex-shrink-0 ml-0 sm:ml-4"
-                    >
-                      <FiEye className="h-4 w-4 mr-2" />
-                      <span className="hidden sm:inline">{t("messages.view")}</span>
-                      <span className="sm:hidden">{t("messages.open")}</span>
-                    </Button>
-                  </div>
-                </Card>
-                  ))
-                )}
-              </div>
-              {pagination && pagination.totalPages > 1 && (
-                <div className="flex items-center justify-between border-t border-border px-4 py-3 mt-4">
-                  <div className="text-sm text-muted-foreground">
-                    {currentPage} {t("company.of")} {pagination.totalPages}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                      disabled={currentPage === 1}
-                    >
-                      <FiChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setCurrentPage((p) => Math.min(pagination.totalPages, p + 1))}
-                      disabled={currentPage === pagination.totalPages}
-                    >
-                      <FiChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </>
+
+            {/* Type filter */}
+            <div className="w-40">
+              <p className="text-[9px] font-mono font-black uppercase tracking-widest text-muted-foreground mb-1">
+                TYPE
+              </p>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger className="font-mono text-xs border-2 border-foreground bg-background h-9">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="border-2 border-foreground">
+                  {TYPE_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value} className="font-mono text-xs">
+                      {o.label.toUpperCase()}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Refresh */}
+            <button
+              onClick={() => refetch()}
+              className="h-9 w-9 flex items-center justify-center border-2 border-foreground bg-background hover:bg-foreground hover:text-background transition-colors"
+              title="Refresh"
+            >
+              <FiRefreshCw className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* ── Bulk actions banner ── */}
+        {selectedIds.size > 0 && (
+          <div className="flex items-center gap-3 border-2 border-primary bg-primary px-4 py-2 shadow-brutal-neon">
+            <span className="text-xs font-mono font-black text-primary-foreground uppercase">
+              {selectedIds.size} SELECTED
+            </span>
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="ml-auto px-3 py-1 text-[10px] font-mono font-black uppercase bg-primary-foreground text-primary border border-primary-foreground hover:opacity-80 transition-opacity"
+            >
+              CLEAR
+            </button>
+          </div>
+        )}
+
+        {/* ── Count ── */}
+        <div className="flex items-center justify-between text-xs font-mono text-muted-foreground">
+          <span>
+            {filtered.length} {t("messages.messages")}
+            {pagination?.total != null && ` / ${pagination.total} total`}
+          </span>
+          {pagination && totalPages > 1 && (
+            <span className="font-bold text-foreground">
+              PAGE {currentPage} / {totalPages}
+            </span>
           )}
-        </main>
-      </div>
-      <Transition show={isDialogOpen} as={Fragment}>
-        <Dialog as="div" className="relative z-50" onClose={setIsDialogOpen}>
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-300"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-200"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-black/50" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center p-2 sm:p-4">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-300"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-200"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
+        </div>
+
+        {/* ── Table ── */}
+        <div className="border-2 border-foreground shadow-brutal overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-foreground">
+                <Th>
+                  <Checkbox
+                    checked={allSelected}
+                    onCheckedChange={toggleAll}
+                    className="border-background data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                  />
+                </Th>
+                <Th>ID</Th>
+                <Th>COMPANY</Th>
+                <Th>TYPE</Th>
+                <Th>STATUS</Th>
+                <Th className="hidden lg:table-cell">CONTENT</Th>
+                <Th className="hidden sm:table-cell">DATE</Th>
+                <Th>ACTIONS</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {isLoading ? (
+                Array.from({ length: 8 }).map((_, i) => (
+                  <tr key={i} className="border-b border-border">
+                    {Array.from({ length: 8 }).map((__, j) => (
+                      <td key={j} className="px-3 py-3">
+                        <div className="h-3 bg-muted w-16" />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-4 py-12 text-center text-xs font-mono uppercase tracking-widest text-muted-foreground"
+                  >
+                    {t("messages.noMessagesFound")}
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((msg, idx) => (
+                  <tr
+                    key={msg.id}
+                    className={cn(
+                      "border-b border-border transition-colors",
+                      idx % 2 === 0 ? "bg-card" : "bg-background",
+                      selectedIds.has(msg.id) && "bg-primary/10",
+                      "hover:bg-muted/60"
+                    )}
+                  >
+                    {/* Checkbox */}
+                    <Td>
+                      <Checkbox
+                        checked={selectedIds.has(msg.id)}
+                        onCheckedChange={() => toggleOne(msg.id)}
+                        className="border-foreground data-[state=checked]:bg-primary data-[state=checked]:border-primary"
+                      />
+                    </Td>
+
+                    {/* ID */}
+                    <Td>
+                      <code className="text-[10px] text-muted-foreground">
+                        {msg.id.slice(0, 8)}…
+                      </code>
+                    </Td>
+
+                    {/* Company */}
+                    <Td>
+                      <span className="inline-block border border-foreground px-1.5 py-0.5 text-[10px] font-mono font-bold uppercase">
+                        {msg.companyCode}
+                      </span>
+                    </Td>
+
+                    {/* Type */}
+                    <Td>
+                      <span className="text-[10px] uppercase font-mono font-bold">
+                        {getTypeLabel(msg.type)}
+                      </span>
+                    </Td>
+
+                    {/* Status */}
+                    <Td>
+                      <StatusPill status={msg.status} label={translateStatus(msg.status)} />
+                    </Td>
+
+                    {/* Content preview */}
+                    <Td className="hidden lg:table-cell max-w-[200px]">
+                      <span className="text-[11px] line-clamp-1 text-muted-foreground">
+                        {msg.content}
+                      </span>
+                    </Td>
+
+                    {/* Date */}
+                    <Td className="hidden sm:table-cell whitespace-nowrap">
+                      <span className="text-[10px]">
+                        {fmtDate(String(msg.createdAt ?? ""))}
+                      </span>
+                    </Td>
+
+                    {/* Actions */}
+                    <Td>
+                      <div className="flex items-center gap-1">
+                        {/* View */}
+                        <button
+                          onClick={() => handleView(msg)}
+                          className="w-7 h-7 flex items-center justify-center border border-foreground bg-background hover:bg-foreground hover:text-background transition-colors"
+                          title="View"
+                        >
+                          <FiEye className="w-3.5 h-3.5" />
+                        </button>
+                        {/* Quick approve */}
+                        <button
+                          onClick={async () => {
+                            try {
+                              await messageService.moderate(msg.id, "approve");
+                              toast.success(t("admin.messageApproved"));
+                              refetch();
+                            } catch {
+                              toast.error(t("admin.moderationError"));
+                            }
+                          }}
+                          className="w-7 h-7 flex items-center justify-center border border-primary bg-primary text-primary-foreground hover:opacity-80 transition-opacity"
+                          title="Approve"
+                        >
+                          <FiCheckCircle className="w-3.5 h-3.5" />
+                        </button>
+                        {/* Quick reject */}
+                        <button
+                          onClick={async () => {
+                            try {
+                              await messageService.moderate(msg.id, "reject");
+                              toast.success(t("admin.messageRejected"));
+                              refetch();
+                            } catch {
+                              toast.error(t("admin.moderationError"));
+                            }
+                          }}
+                          className="w-7 h-7 flex items-center justify-center border border-destructive bg-destructive text-destructive-foreground hover:opacity-80 transition-opacity"
+                          title="Reject"
+                        >
+                          <FiX className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </Td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* ── Pagination ── */}
+        {pagination && totalPages > 1 && (
+          <div className="flex items-center justify-between border-2 border-foreground bg-card px-4 py-2 shadow-brutal">
+            <span className="text-xs font-mono font-bold uppercase text-muted-foreground">
+              PAGE {currentPage} / {totalPages}
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="w-8 h-8 flex items-center justify-center border-2 border-foreground bg-background disabled:opacity-40 hover:bg-foreground hover:text-background transition-colors"
               >
-                <Dialog.Panel className="w-full max-w-2xl transform overflow-hidden rounded-lg bg-card border border-border shadow-xl transition-all p-4 sm:p-6 max-h-[90vh] overflow-y-auto">
-                  <Dialog.Title className="text-base sm:text-lg font-semibold text-foreground mb-3 sm:mb-4">
-                    {t("admin.messageModeration")}
-                  </Dialog.Title>
-                  {selectedMessage && (
-                    <div className="space-y-4 sm:space-y-6">
-                      <div className="space-y-2">
-                        <p className="text-xs sm:text-sm text-muted-foreground break-all">ID: {selectedMessage.id}</p>
-                        <p className="text-xs sm:text-sm text-muted-foreground">{t("admin.companyName")}: {selectedMessage.companyCode}</p>
-                        <p className="text-xs sm:text-sm text-muted-foreground">{t("messages.type")}: {getTypeLabel(selectedMessage.type)}</p>
-                        <div className="flex items-center gap-2">
-                          <p className="text-xs sm:text-sm text-muted-foreground">{t("checkStatus.status")}:</p>
-                          <Badge className={`${getStatusColor(selectedMessage.status)} text-xs`}>
-                            {translateStatus(selectedMessage.status)}
-                          </Badge>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <p className="text-xs sm:text-sm font-semibold text-foreground">{t("sendMessage.message")}:</p>
-                        <div className="bg-muted p-3 sm:p-4 rounded-lg">
-                          <p className="text-sm sm:text-base text-foreground whitespace-pre-wrap break-words">{selectedMessage.content}</p>
-                        </div>
-                      </div>
-                      {selectedMessage.companyResponse && (
-                        <div className="space-y-2">
-                          <p className="text-xs sm:text-sm font-semibold text-foreground">{t("checkStatus.companyResponse")}:</p>
-                          <div className="bg-muted p-3 sm:p-4 rounded-lg border border-border">
-                            <p className="text-sm sm:text-base text-foreground whitespace-pre-wrap break-words">{selectedMessage.companyResponse}</p>
-                          </div>
-                        </div>
-                      )}
-                      <div className="flex flex-col sm:flex-row gap-2 sm:gap-3">
-                        <Button
-                          variant="outline"
-                          onClick={() => handleModerate("approve")}
-                          className="flex-1 w-full sm:w-auto"
-                        >
-                          <FiCheckCircle className="h-4 w-4 mr-2" />
-                          {t("admin.approve")}
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          onClick={() => handleModerate("reject")}
-                          className="flex-1 w-full sm:w-auto"
-                        >
-                          <FiX className="h-4 w-4 mr-2" />
-                          {t("admin.reject")}
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          onClick={handleDeleteClick}
-                          className="flex-1 w-full sm:w-auto"
-                        >
-                          <FiTrash2 className="h-4 w-4 mr-2" />
-                          {t("admin.deleteMessage")}
-                        </Button>
-                      </div>
-                    </div>
+                <FiChevronLeft className="w-4 h-4" />
+              </button>
+              {pageButtons.map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setCurrentPage(p)}
+                  className={cn(
+                    "w-8 h-8 text-xs font-mono font-black border-2 transition-colors",
+                    p === currentPage
+                      ? "bg-foreground text-background border-foreground"
+                      : "bg-background text-foreground border-foreground hover:bg-muted"
                   )}
-                </Dialog.Panel>
-              </Transition.Child>
+                >
+                  {p}
+                </button>
+              ))}
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="w-8 h-8 flex items-center justify-center border-2 border-foreground bg-background disabled:opacity-40 hover:bg-foreground hover:text-background transition-colors"
+              >
+                <FiChevronRight className="w-4 h-4" />
+              </button>
             </div>
           </div>
-        </Dialog>
-      </Transition>
+        )}
+      </main>
 
-      {/* Delete Message Confirmation Dialog */}
-      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <AlertDialogContent>
+      {/* ── View / moderation modal ── */}
+      <ViewModal
+        message={selectedMessage}
+        open={isViewOpen}
+        onClose={() => setIsViewOpen(false)}
+        onApprove={() => handleModerate("approve")}
+        onReject={() => handleModerate("reject")}
+        onDeleteRequest={() => setIsDeleteOpen(true)}
+        translateStatus={translateStatus}
+        getTypeLabel={getTypeLabel}
+      />
+
+      {/* ── Delete confirmation ── */}
+      <AlertDialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <AlertDialogContent className="border-2 border-destructive shadow-brutal-danger">
           <AlertDialogHeader>
-            <AlertDialogTitle>{t("admin.deleteMessage")}</AlertDialogTitle>
-            <AlertDialogDescription>
+            <AlertDialogTitle className="font-mono font-black uppercase tracking-wide">
+              {t("admin.deleteMessage").toUpperCase()}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="font-mono text-xs">
               {t("admin.deleteMessageConfirm")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setIsDeleteDialogOpen(false)}>
-              {t("common.cancel")}
+            <AlertDialogCancel className="font-mono font-black text-xs uppercase border-2 border-foreground">
+              {t("common.cancel").toUpperCase()}
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteConfirm}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="font-mono font-black text-xs uppercase bg-destructive text-destructive-foreground border-2 border-destructive hover:bg-destructive/90"
             >
-              {t("common.delete")}
+              {t("common.delete").toUpperCase()}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

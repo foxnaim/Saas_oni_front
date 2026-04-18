@@ -8,13 +8,15 @@ import { queryKeys } from "./index";
 import type { Message, Company, Stats, MessageDistribution, GrowthMetrics, SubscriptionPlan, AdminUser, AchievementProgress, PlanType } from "@/types";
 import type { PlatformStats } from "./types";
 import type { GroupedAchievements } from "../achievements";
-import { 
-  messageService, 
-  companyService, 
-  statsService, 
-  plansService, 
-  adminService 
+import {
+  messageService,
+  companyService,
+  statsService,
+  plansService,
+  adminService,
+  telegramService,
 } from "./services";
+import type { TelegramAuthData, TelegramAuthResponse } from "./services";
 import type { MessagesResponse } from "./services";
 import { getMessagesList, setMessagesInCache, type MessagesCacheValue } from "./messagesCache";
 import { adminSettingsApi, type AdminSettings, type UpdateAdminSettingsRequest } from "../api/adminSettings";
@@ -1400,5 +1402,30 @@ export const useVerifyPayment = () => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["company"] });
     },
+  });
+};
+
+/**
+ * Хук для аутентификации через Telegram
+ */
+export const useTelegramAuth = (options?: Omit<UseMutationOptions<TelegramAuthResponse, Error, TelegramAuthData>, 'mutationFn'>) => {
+  return useMutation<TelegramAuthResponse, Error, TelegramAuthData>({
+    mutationFn: (data: TelegramAuthData) => telegramService.telegramAuth(data),
+    ...options,
+  });
+};
+
+/**
+ * Хук для привязки Telegram-чата к компании
+ */
+export const useLinkTelegram = (options?: Omit<UseMutationOptions<{ companyId: string; telegramChatId: string }, Error, { companyId: string; chatId: string }>, 'mutationFn'>) => {
+  const queryClient = useQueryClient();
+  return useMutation<{ companyId: string; telegramChatId: string }, Error, { companyId: string; chatId: string }>({
+    mutationFn: ({ companyId, chatId }: { companyId: string; chatId: string }) =>
+      telegramService.linkTelegram(companyId, chatId),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.company(variables.companyId) });
+    },
+    ...options,
   });
 };

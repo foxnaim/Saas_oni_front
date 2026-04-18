@@ -1,44 +1,65 @@
 /**
- * Server Component обертка для Welcome
- * Загружает данные на сервере и передает в клиентский компонент
+ * WelcomeServer — RSC wrapper for the landing page.
+ *
+ * Responsibilities:
+ *   1. Fetch public companies for SEO (ISR, revalidate every 120 s).
+ *   2. Optionally resolve a specific company by code (from /[code] route).
+ *   3. Pass all pre-fetched data to the Welcome client component.
+ *
+ * This file must NOT contain 'use client'.
  */
 
-import Welcome from "./Welcome";
+import Welcome from "@/components/pages/Welcome";
 import { serverApiClient } from "@/lib/api/server";
 import type { Company } from "@/types";
 
+// ── ISR ────────────────────────────────────────────────────────────────────────
+// Next.js reads this export from the nearest page or layout, not from a
+// Server Component inside /components — but we declare it here as documentation
+// and re-export it from the actual page files when needed.
+export const revalidate = 120;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface WelcomeServerProps {
+  /** 8-character company code from the /[code] URL segment. */
   initialCompanyCode?: string;
-  searchParams?: { code?: string; lang?: string };
+  /** Raw search params forwarded from the Next.js page. */
+  searchParams?: { code?: string; lang?: string; register?: string };
 }
 
-/**
- * Server Component - загружает данные на сервере
- */
+// ─────────────────────────────────────────────────────────────────────────────
+// Server Component
+// ─────────────────────────────────────────────────────────────────────────────
+
 export default async function WelcomeServer({
   initialCompanyCode,
   searchParams,
 }: WelcomeServerProps) {
-  // Определяем код компании из параметров
-  const code = initialCompanyCode || searchParams?.code?.toUpperCase();
-  const isValidCode = code && code.length === 8;
+  // ── Resolve company code (prop takes precedence over search param) ──────────
+  const rawCode = initialCompanyCode ?? searchParams?.code;
+  const code = rawCode?.toUpperCase().trim();
+  const isValidCode = typeof code === "string" && code.length === 8;
 
-  // Загружаем данные компании на сервере, если код валиден
-  // Ошибки обрабатываются внутри serverApiClient, возвращается null при ошибке
-  let initialCompany: Company | null = null;
-  if (isValidCode) {
-    initialCompany = await serverApiClient.getCompanyByCode(code);
-    // serverApiClient уже обрабатывает ошибки и возвращает null
-  }
+  // ── Parallel data fetching ──────────────────────────────────────────────────
+  const [initialCompany, publicCompanies] = await Promise.all([
+    // Fetch the specific company when a valid code is present.
+    isValidCode
+      ? serverApiClient.getCompanyByCode(code as string)
+      : Promise.resolve(null as Company | null),
 
-  // Передаем данные в клиентский компонент
-  // Suspense не нужен здесь, так как Welcome - клиентский компонент
-  // и данные уже загружены на сервере
+    // Fetch public company list for SEO (sitemap / structured data hydration).
+    // Falls back to [] on network error — graceful degradation.
+    serverApiClient.getPublicCompanies(),
+  ]);
+
   return (
-    <Welcome 
-      initialCompanyCode={code || undefined}
+    <Welcome
+      initialCompanyCode={isValidCode ? code : undefined}
       initialCompany={initialCompany}
+      publicCompanies={publicCompanies}
     />
   );
 }
-

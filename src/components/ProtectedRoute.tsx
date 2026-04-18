@@ -1,145 +1,143 @@
 'use client';
 
-import { useRouter } from "next/navigation";
-import { useTranslation } from "react-i18next";
-import { useAuth } from "@/lib/redux";
-import { useNextAuth } from "@/lib/hooks/useNextAuth";
-import { UserRole } from "@/types";
-import { useEffect, useMemo } from "react";
-import { getToken } from "@/lib/utils/cookies";
-import { useCompany } from "@/lib/query";
+import { useRouter } from 'next/navigation';
+import { useEffect, useMemo } from 'react';
+import { useAuth } from '@/lib/redux';
+import { useNextAuth } from '@/lib/hooks/useNextAuth';
+import { useCompany } from '@/lib/query';
+import { getToken } from '@/lib/utils/cookies';
+import { UserRole } from '@/types';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requiredRole?: UserRole | UserRole[];
 }
 
+// Skeleton shown while auth state resolves
+function LoadingSkeleton() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="flex flex-col items-center gap-4">
+        {/* Brutalist spinner — square rotating border */}
+        <div className="h-12 w-12 border-4 border-border border-t-primary animate-spin" />
+        {/* Stacked skeleton bars */}
+        <div className="flex flex-col gap-2 w-48">
+          <div className="h-2 bg-muted animate-pulse w-full" />
+          <div className="h-2 bg-muted animate-pulse w-3/4" />
+          <div className="h-2 bg-muted animate-pulse w-1/2" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export const ProtectedRoute = ({ children, requiredRole }: ProtectedRouteProps) => {
-  const { t } = useTranslation();
   const { isAuthenticated, user, isLoading } = useAuth();
   const { isAuthenticated: isNextAuthAuthenticated, session, isLoading: isNextAuthLoading } = useNextAuth();
   const router = useRouter();
 
-  // Проверяем авторизацию через Redux или NextAuth
   const hasAuth = isAuthenticated || isNextAuthAuthenticated;
-  const currentUser = useMemo(() => {
-    return user || (session?.user ? {
-      id: session.user.id,
-      email: session.user.email,
-      role: session.user.role as UserRole,
-      companyId: session.user.companyId,
-      name: session.user.name || undefined,
-    } : null);
-  }, [user, session?.user]);
   const authLoading = isLoading || isNextAuthLoading;
 
-  // Загружаем данные компании для проверки блокировки (только для роли company)
+  const currentUser = useMemo(() => {
+    if (user) return user;
+    if (session?.user) {
+      return {
+        id: session.user.id,
+        email: session.user.email,
+        role: session.user.role as UserRole,
+        companyId: session.user.companyId,
+        name: session.user.name || undefined,
+      };
+    }
+    return null;
+  }, [user, session?.user]);
+
+  // Load company data only for company-role users to check blocked status
   const { data: company, isLoading: companyLoading } = useCompany(
     currentUser?.companyId || 0,
-    {
-      enabled: !!currentUser?.companyId && currentUser?.role === 'company',
-    }
+    { enabled: !!currentUser?.companyId && currentUser?.role === 'company' }
   );
 
-  // Проверяем, заблокирована ли компания
-  const isCompanyBlocked = company?.status === "Заблокирована";
+  const isCompanyBlocked = company?.status === 'Blocked';
 
+  // ── Redirect logic ────────────────────────────────────────────────────────
   useEffect(() => {
-    // Проверяем наличие токена или NextAuth сессии
+    if (authLoading) return;
+
     const token = getToken();
-    const hasTokenOrSession = token || isNextAuthAuthenticated;
-    
-    // Если нет ни токена, ни сессии, перенаправляем на главный экран
-    if (!hasTokenOrSession && !authLoading) {
-      router.replace("/");
+    const hasSession = token || isNextAuthAuthenticated;
+
+    // Not authenticated at all → home
+    if (!hasSession || !hasAuth) {
+      router.replace('/');
       return;
     }
 
-    // Если загрузка завершена и пользователь не аутентифицирован, перенаправляем
-    if (!authLoading && !hasAuth) {
-      router.replace("/");
-      return;
-    }
+    if (!currentUser) return;
 
-    // Проверяем роль пользователя, если требуется
-    if (!authLoading && hasAuth && currentUser && requiredRole) {
-      const roles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
-      // Приводим роли к нижнему регистру для надежного сравнения
-      const userRole = String(currentUser.role).toLowerCase();
-      const allowedRoles = roles.map(r => String(r).toLowerCase());
-      
-      if (!allowedRoles.includes(userRole)) {
-        if (userRole === "company") {
-          router.replace("/company");
-        } else if (userRole === "admin" || userRole === "super_admin") {
-          router.replace("/admin");
-        } else {
-          router.replace("/");
-        }
+    // Wrong role → redirect to appropriate panel
+    if (requiredRole) {
+      const required = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
+      const role = String(currentUser.role).toLowerCase();
+      const allowed = required.map((r) => String(r).toLowerCase());
+
+      if (!allowed.includes(role)) {
+        if (role === 'company') router.replace('/company');
+        else if (role === 'admin' || role === 'super_admin') router.replace('/admin');
+        else router.replace('/');
+        return;
       }
     }
 
-    // Если компания заблокирована и пользователь пытается перейти на страницы компании (кроме главной),
-    // перенаправляем на главную страницу компании
+    // Blocked company: restrict to /company root only
     if (
-      !authLoading &&
       !companyLoading &&
-      hasAuth &&
-      currentUser?.role === "company" &&
+      currentUser.role === 'company' &&
       isCompanyBlocked &&
-      requiredRole === "company"
+      requiredRole === 'company'
     ) {
-      const currentPath = window.location.pathname;
-      if (currentPath !== "/company") {
-        router.replace("/company");
+      const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+      if (currentPath !== '/company') {
+        router.replace('/company');
       }
     }
-  }, [hasAuth, currentUser, authLoading, requiredRole, router, isNextAuthAuthenticated, companyLoading, isCompanyBlocked]);
+  }, [
+    hasAuth,
+    currentUser,
+    authLoading,
+    requiredRole,
+    router,
+    isNextAuthAuthenticated,
+    companyLoading,
+    isCompanyBlocked,
+  ]);
 
-  if (authLoading || (currentUser?.role === "company" && companyLoading)) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">{t("common.loading")}</p>
-        </div>
-      </div>
-    );
+  // ── Loading state ────────────────────────────────────────────────────────
+  if (authLoading || (currentUser?.role === 'company' && companyLoading)) {
+    return <LoadingSkeleton />;
   }
 
-  // Проверяем токен или NextAuth сессию еще раз перед рендером
+  // ── Guard render ─────────────────────────────────────────────────────────
   const token = getToken();
-  const hasTokenOrSession = token || isNextAuthAuthenticated;
-  
-  // Если нет авторизации, не рендерим ничего (редирект уже произошел в useEffect)
-  if (!hasTokenOrSession || !hasAuth || !currentUser) {
-    return null;
-  }
+  const hasSession = token || isNextAuthAuthenticated;
 
-  // Проверяем роль пользователя, если требуется
+  if (!hasSession || !hasAuth || !currentUser) return null;
+
   if (requiredRole) {
-    const roles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
-    // Приводим роли к нижнему регистру для надежного сравнения
-    const userRole = String(currentUser.role).toLowerCase();
-    const allowedRoles = roles.map(r => String(r).toLowerCase());
-    
-    if (!allowedRoles.includes(userRole)) {
-      // Если роль не подходит, не рендерим (редирект уже произошел в useEffect)
-      return null;
-    }
+    const required = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
+    const role = String(currentUser.role).toLowerCase();
+    const allowed = required.map((r) => String(r).toLowerCase());
+    if (!allowed.includes(role)) return null;
   }
 
-  // Если компания заблокирована и пользователь пытается перейти на страницы компании (кроме главной),
-  // не рендерим содержимое (редирект уже произошел в useEffect)
   if (
-    currentUser?.role === "company" &&
+    currentUser.role === 'company' &&
     isCompanyBlocked &&
-    requiredRole === "company"
+    requiredRole === 'company'
   ) {
-    const currentPath = typeof window !== "undefined" ? window.location.pathname : "";
-    if (currentPath !== "/company") {
-      return null;
-    }
+    const currentPath = typeof window !== 'undefined' ? window.location.pathname : '';
+    if (currentPath !== '/company') return null;
   }
 
   return <>{children}</>;

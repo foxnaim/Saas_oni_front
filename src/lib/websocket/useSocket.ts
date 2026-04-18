@@ -42,8 +42,8 @@ const showNotification = (title: string, options?: NotificationOptions) => {
 
   if (Notification.permission === 'granted') {
     new Notification(title, {
-      icon: '/feedBack.svg',
-      badge: '/feedBack.svg',
+      icon: '/sayless.svg',
+      badge: '/sayless.svg',
       ...options,
     });
   }
@@ -220,7 +220,7 @@ export const useSocketMessages = (companyCode?: string | null) => {
         : tRef.current('sendMessage.suggestion');
       
       showNotification(
-        tRef.current('notifications.newMessage') || 'Новое сообщение',
+        tRef.current('notifications.newMessage') || 'New message',
         {
           body: `${messageType}: ${message.content.substring(0, 100)}${message.content.length > 100 ? '...' : ''}`,
           tag: `message-${message.id}`,

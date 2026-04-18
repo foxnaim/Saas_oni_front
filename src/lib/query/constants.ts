@@ -8,6 +8,11 @@ export const API_CONFIG = {
   RETRY_ATTEMPTS: 3,
 } as const;
 
+// Query key constants
+export const QUERY_KEYS = {
+  TELEGRAM: 'telegram',
+} as const;
+
 // Оптимизированные задержки для разных типов запросов
 export const DELAYS = {
   // Для моков держим почти ноль, чтобы админка отвечала мгновенно

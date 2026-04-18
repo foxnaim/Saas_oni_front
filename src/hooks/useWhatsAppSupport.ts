@@ -37,7 +37,7 @@ export function useWhatsAppSupport() {
   }, [company?.plan, plans]);
 
   const message = useMemo(() => {
-    const greeting = t("admin.supportMessage") || "Здравствуйте! Мне нужна помощь с платформой FeedBack.";
+    const greeting = t("admin.supportMessage") || "Здравствуйте! Мне нужна помощь с платформой Sayless.";
     const priority = permissions.isPro
       ? `\n\n⚠️ ${t("admin.prioritySupportNote") || "ПРИОРИТЕТНАЯ ПОДДЕРЖКА (Pro план)"}`
       : "";

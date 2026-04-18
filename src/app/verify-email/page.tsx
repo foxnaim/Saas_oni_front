@@ -4,7 +4,7 @@ import VerifyEmailPage from "@/components/pages/VerifyEmailPage";
 export const dynamic = 'force-dynamic';
 
 export const metadata = {
-  title: "Verify Email | FeedbackHub",
+  title: "Verify Email | Sayless",
 };
 
 export default function VerifyEmail() {

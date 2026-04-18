@@ -4,11 +4,11 @@
 
 // Storage Keys
 export const STORAGE_KEYS = {
-  USER: 'feedbackhub_user',
-  PASSWORD: 'feedbackhub_password',
-  TOKEN: 'feedbackhub_token',
-  FULLSCREEN: 'feedbackhub_fullscreen_mode',
+  USER: 'sayless_user',
+  PASSWORD: 'sayless_password',
+  TOKEN: 'sayless_token',
+  FULLSCREEN: 'sayless_fullscreen_mode',
   THEME: 'theme',
-  LOGIN_ROLE: 'feedbackhub_login_role', // Роль, под которой был выполнен вход
+  LOGIN_ROLE: 'sayless_login_role', // Роль, под которой был выполнен вход
 } as const;
 

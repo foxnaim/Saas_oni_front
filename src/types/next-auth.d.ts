@@ -10,6 +10,7 @@ declare module "next-auth" {
       image?: string | null;
       role: string;
       companyId?: string;
+      telegramId?: number;
     };
     accessToken?: string;
     apiToken?: string;
@@ -22,6 +23,7 @@ declare module "next-auth" {
     role: string;
     companyId?: string;
     token?: string;
+    telegramId?: number;
   }
 }
 

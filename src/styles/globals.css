@@ -1,158 +1,224 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   SAYLESS — Monochrome Neon Design System
+   Brutalist. Sharp. No mercy on the rounded corners.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ─── Font imports (Google Fonts fallback for environments without next/font) ── */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CSS VARIABLES — HSL format
+   Palette: Refined Brutal
+   #FAFAF9 warm-stone  · #121214 soft-dark    · #A3E635 lime-400
+   #1C1917 text-light  · #E7E5E4 text-dark    · #EF4444 danger
+   #22C55E success     · #78716C muted        · #D6D3D1 border-light
+   #292524 border-dark · #FFFFFF card-light   · #1C1917 card-dark
+   ══════════════════════════════════════════════════════════════════════════ */
+
 @layer base {
-  html, body {
+  /* ── Light theme ─────────────────────────────────────────────────────── */
+  :root {
+    /* Backgrounds */
+    --background:            60 9% 98%;    /* #FAFAF9 warm stone      */
+    --foreground:            20 6% 10%;    /* #1C1917 stone-900 text  */
+
+    /* Cards / surfaces */
+    --card:                  0 0% 100%;    /* #FFFFFF                 */
+    --card-foreground:       20 6% 10%;    /* #1C1917                 */
+
+    /* Popovers */
+    --popover:               0 0% 100%;
+    --popover-foreground:    20 6% 10%;
+
+    /* Primary — lime-400 #A3E635 */
+    --primary:               82 77% 55%;   /* #A3E635                 */
+    --primary-foreground:    20 6% 10%;    /* stone-900 on lime       */
+
+    /* Secondary — soft dark surface */
+    --secondary:             240 4% 8%;    /* #121214                 */
+    --secondary-foreground:  60 9% 98%;    /* warm stone on dark      */
+
+    /* Destructive / danger — red-500 #EF4444 */
+    --destructive:           0 84% 60%;    /* #EF4444                 */
+    --destructive-foreground: 0 0% 100%;
+
+    /* Accent mirrors destructive for brutalist single-accent system */
+    --accent:                0 84% 60%;    /* #EF4444                 */
+    --accent-foreground:     0 0% 100%;
+
+    /* Success — green-500 #22C55E */
+    --success:               142 71% 45%;  /* #22C55E                 */
+    --success-foreground:    0 0% 100%;
+
+    /* Muted */
+    --muted:                 30 7% 92%;    /* warm light grey surface */
+    --muted-foreground:      25 5% 45%;    /* #78716C stone-500       */
+
+    /* Borders */
+    --border:                20 6% 83%;    /* #D6D3D1 stone-300       */
+    --input:                 20 6% 83%;
+
+    /* Focus ring — lime */
+    --ring:                  82 77% 55%;   /* #A3E635                 */
+
+    /* Radius — 0 by default, brutalist */
+    --radius:                0px;
+
+    /* Sidebar */
+    --sidebar-background:          240 10% 6%;    /* #0C0C0E sidebar dark    */
+    --sidebar-foreground:          30 7% 90%;      /* #E7E5E4 stone-200       */
+    --sidebar-primary:             82 77% 55%;     /* #A3E635 lime            */
+    --sidebar-primary-foreground:  20 6% 10%;      /* stone-900 on lime       */
+    --sidebar-accent:              0 84% 60%;       /* #EF4444                 */
+    --sidebar-accent-foreground:   0 0% 100%;
+    --sidebar-border:              20 6% 15%;       /* #292524 stone-800       */
+    --sidebar-ring:                82 77% 55%;      /* #A3E635                 */
+  }
+
+  /* ── Dark theme ──────────────────────────────────────────────────────── */
+  .dark {
+    /* Backgrounds */
+    --background:            240 4% 8%;    /* #121214 soft dark       */
+    --foreground:            30 7% 90%;    /* #E7E5E4 stone-200       */
+
+    /* Cards / surfaces */
+    --card:                  20 6% 10%;    /* #1C1917 stone-900       */
+    --card-foreground:       30 7% 90%;    /* #E7E5E4                 */
+
+    /* Popovers */
+    --popover:               20 6% 10%;
+    --popover-foreground:    30 7% 90%;
+
+    /* Primary — lime-400 softer on dark */
+    --primary:               82 77% 55%;   /* #A3E635                 */
+    --primary-foreground:    20 6% 10%;    /* stone-900 on lime       */
+
+    /* Secondary */
+    --secondary:             60 9% 98%;    /* warm stone reversed     */
+    --secondary-foreground:  20 6% 10%;
+
+    /* Destructive */
+    --destructive:           0 84% 60%;    /* #EF4444                 */
+    --destructive-foreground: 0 0% 100%;
+
+    /* Accent */
+    --accent:                0 84% 60%;    /* #EF4444                 */
+    --accent-foreground:     0 0% 100%;
+
+    /* Success */
+    --success:               142 71% 45%;  /* #22C55E                 */
+    --success-foreground:    0 0% 100%;
+
+    /* Muted */
+    --muted:                 20 6% 15%;    /* #292524 stone-800       */
+    --muted-foreground:      25 5% 45%;    /* #78716C stone-500       */
+
+    /* Borders */
+    --border:                20 6% 15%;    /* #292524 stone-800       */
+    --input:                 20 6% 15%;
+
+    /* Focus ring — lime */
+    --ring:                  82 77% 55%;   /* #A3E635                 */
+
+    /* Sidebar */
+    --sidebar-background:          240 10% 6%;     /* #0C0C0E sidebar dark    */
+    --sidebar-foreground:          30 7% 90%;       /* #E7E5E4 stone-200       */
+    --sidebar-primary:             82 77% 55%;      /* #A3E635 lime            */
+    --sidebar-primary-foreground:  20 6% 10%;
+    --sidebar-accent:              0 84% 60%;        /* #EF4444                 */
+    --sidebar-accent-foreground:   0 0% 100%;
+    --sidebar-border:              20 6% 15%;        /* #292524 stone-800       */
+    --sidebar-ring:                82 77% 55%;       /* #A3E635                 */
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   BASE RESET
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@layer base {
+  /* Hard reset — no rounded corners anywhere */
+  *,
+  *::before,
+  *::after {
+    @apply border-border;
+    border-radius: 0;
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
     overflow-x: hidden;
     width: 100%;
-  }
-}
-
-@layer utilities {
-  .scrollbar-hide {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none;
-  }
-  
-  .safe-area-inset-bottom {
-    padding-bottom: env(safe-area-inset-bottom, 0);
-  }
-  
-  .touch-manipulation {
-    touch-action: manipulation;
-  }
-}
-
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
-
-@layer base {
-  :root {
-    /* Background colors */
-    --background: 240 20% 97%; /* #F7F7FA */
-    --foreground: 239 57% 15%; /* Dark text for headings */
-
-    --card: 0 0% 100%; /* White cards */
-    --card-foreground: 239 57% 15%;
-
-    --popover: 0 0% 100%;
-    --popover-foreground: 239 57% 15%;
-
-    /* Primary: #2F2FA2 */
-    --primary: 240 57% 41%; /* #2F2FA2 */
-    --primary-foreground: 0 0% 100%;
-    
-    /* Primary Dark / Navigation: #242582 */
-    --primary-dark: 239 57% 33%; /* #242582 */
-
-    /* Secondary: #553D67 */
-    --secondary: 280 26% 32%; /* #553D67 */
-    --secondary-foreground: 0 0% 100%;
-    
-    --secondary-light: 280 26% 45%;
-
-    /* Muted: #99738E */
-    --muted: 240 12% 90%; /* Light background #E0E0E8 */
-    --muted-foreground: 320 15% 53%; /* #99738E for text */
-
-    /* Accent / Alert: #F64C72 */
-    --accent: 345 90% 63%; /* #F64C72 */
-    --accent-foreground: 0 0% 100%;
-
-    --destructive: 345 90% 63%; /* #F64C72 */
-    --destructive-foreground: 0 0% 100%;
-
-    /* Success / Resolved: Primary color for "Решено" status */
-    --success: 240 57% 41%; /* #2F2FA2 - Primary color for resolved status */
-    --success-foreground: 0 0% 100%;
-
-    /* Borders: #E0E0E8 */
-    --border: 240 12% 90%; /* #E0E0E8 */
-    --input: 240 12% 90%;
-    --ring: 240 57% 41%; /* Primary color */
-
-    --radius: 0.75rem;
-
-    /* Sidebar: Primary Dark / Navigation */
-    --sidebar-background: 239 57% 33%; /* #242582 */
-    --sidebar-foreground: 0 0% 100%;
-    --sidebar-primary: 240 57% 41%; /* #2F2FA2 */
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 57% 41%; /* #2F2FA2 */
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 240 12% 90%;
-    --sidebar-ring: 240 57% 41%;
-  }
-
-  .dark {
-    --background: 239 57% 10%;
-    --foreground: 0 0% 98%;
-
-    --card: 239 57% 12%;
-    --card-foreground: 0 0% 98%;
-
-    --popover: 239 57% 12%;
-    --popover-foreground: 0 0% 98%;
-
-    /* Primary: #2F2FA2 - slightly lighter in dark mode */
-    --primary: 240 57% 50%;
-    --primary-foreground: 0 0% 100%;
-    
-    /* Primary Dark / Navigation: #242582 */
-    --primary-dark: 239 57% 33%; /* #242582 */
-
-    /* Secondary: #553D67 - slightly lighter in dark mode */
-    --secondary: 280 26% 40%;
-    --secondary-foreground: 0 0% 100%;
-    
-    --secondary-light: 280 26% 50%;
-
-    /* Muted: #99738E */
-    --muted: 239 57% 18%;
-    --muted-foreground: 320 15% 60%;
-
-    /* Accent / Alert: #F64C72 */
-    --accent: 345 90% 63%; /* #F64C72 */
-    --accent-foreground: 0 0% 100%;
-
-    --destructive: 345 90% 63%; /* #F64C72 */
-    --destructive-foreground: 0 0% 100%;
-
-    /* Success / Resolved: Primary color for "Решено" status */
-    --success: 240 57% 50%; /* #2F2FA2 - Lighter primary for dark mode */
-    --success-foreground: 0 0% 100%;
-
-    --border: 239 57% 20%;
-    --input: 239 57% 20%;
-    --ring: 240 57% 50%;
-    
-    /* Sidebar: Primary Dark / Navigation */
-    --sidebar-background: 239 57% 33%; /* #242582 */
-    --sidebar-foreground: 0 0% 100%;
-    --sidebar-primary: 240 57% 50%; /* Lighter primary for dark mode */
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 57% 50%;
-    --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 239 57% 25%;
-    --sidebar-ring: 240 57% 50%;
-  }
-}
-
-@layer base {
-  * {
-    @apply border-border;
   }
 
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-body), Inter, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Fullscreen mode - скрываем элементы браузера без блокировки кликов */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading), "Space Grotesk", system-ui, sans-serif;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  code, kbd, samp, pre {
+    font-family: var(--font-mono), "JetBrains Mono", Menlo, monospace;
+  }
+
+  /* ── Selection ─────────────────────────────────────────────────────── */
+  ::selection {
+    background-color: #A3E635;
+    color: #1C1917;
+  }
+  ::-moz-selection {
+    background-color: #A3E635;
+    color: #1C1917;
+  }
+
+  /* ── Focus ring — lime 2px, no radius ─────────────────────────────── */
+  :focus-visible {
+    outline: 2px solid #A3E635;
+    outline-offset: 2px;
+  }
+
+  /* ── Scrollbar styling ─────────────────────────────────────────────── */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--background));
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #78716C;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #A3E635;
+  }
+
+  /* Firefox */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #78716C hsl(var(--background));
+  }
+
+  /* ── Body lock ─────────────────────────────────────────────────────── */
+  body.no-scroll {
+    overflow: hidden !important;
+    position: fixed;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* ── Fullscreen mode (styles/globals.css variant) ─────────────────── */
   html.fullscreen-mode {
     overflow: hidden;
     height: 100%;
@@ -165,12 +231,10 @@ All colors MUST be HSL.
     position: relative;
   }
 
-  /* Гарантируем, что все элементы кликабельны в полноэкранном режиме */
   body.fullscreen-mode * {
     pointer-events: auto !important;
   }
 
-  /* Особенно важно для интерактивных элементов */
   body.fullscreen-mode button,
   body.fullscreen-mode a,
   body.fullscreen-mode [role="button"],
@@ -179,5 +243,74 @@ All colors MUST be HSL.
   body.fullscreen-mode [onclick] {
     pointer-events: auto !important;
     cursor: pointer !important;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CUSTOM UTILITIES — Brutalist toolkit
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@layer utilities {
+  /* ── Brutalist text treatment ──────────────────────────────────────── */
+  .text-brutal {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+  }
+
+  /* ── Hard 2px border ───────────────────────────────────────────────── */
+  .border-brutal {
+    border: 2px solid currentColor;
+  }
+
+  /* ── Brutalist drop shadow — flat, hard, no blur ───────────────────── */
+  .shadow-brutal {
+    box-shadow: 4px 4px 0px #292524;
+  }
+
+  .dark .shadow-brutal {
+    box-shadow: 4px 4px 0px #A3E635;
+  }
+
+  /* ── Small brutalist drop shadow (2px offset) ──────────────────────── */
+  .shadow-brutal-sm {
+    box-shadow: 2px 2px 0px #292524;
+  }
+
+  .dark .shadow-brutal-sm {
+    box-shadow: 2px 2px 0px #A3E635;
+  }
+
+  /* ── Lime shadow variant ───────────────────────────────────────────── */
+  .shadow-brutal-neon {
+    box-shadow: 4px 4px 0px #A3E635;
+  }
+
+  /* ── Danger shadow variant ─────────────────────────────────────────── */
+  .shadow-brutal-danger {
+    box-shadow: 4px 4px 0px #EF4444;
+  }
+
+  /* ── Inset shadow (pressed state) ─────────────────────────────────── */
+  .shadow-brutal-inset {
+    box-shadow: inset 4px 4px 0px #292524;
+  }
+
+  /* ── Scrollbar helpers ─────────────────────────────────────────────── */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* ── Mobile safe area ──────────────────────────────────────────────── */
+  .safe-area-inset-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  .touch-manipulation {
+    touch-action: manipulation;
   }
 }

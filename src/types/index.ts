@@ -1,10 +1,10 @@
 // Типы данных для приложения
 
 export type MessageType = "complaint" | "praise" | "suggestion";
-export type MessageStatus = "Новое" | "В работе" | "Решено" | "Отклонено" | "Спам";
+export type MessageStatus = "New" | "InProgress" | "Resolved" | "Rejected" | "Spam";
 export type UserRole = "user" | "company" | "admin" | "super_admin";
-export type CompanyStatus = "Активна" | "Пробная" | "Заблокирована";
-export type PlanType = "Пробный" | "Стандарт" | "Про" | string; // string для кастомных планов
+export type CompanyStatus = "Active" | "Trial" | "Blocked";
+export type PlanType = "Trial" | "Standard" | "Pro" | string; // string для кастомных планов
 
 export interface Message {
   id: string;
@@ -18,6 +18,7 @@ export interface Message {
   companyResponse?: string;
   adminNotes?: string;
   previousStatus?: MessageStatus; // Статус до пометки как спам админом
+  telegramMessageId?: number;
 }
 
 export interface Company {
@@ -40,6 +41,7 @@ export interface Company {
   logoUrl?: string;
   fullscreenMode?: boolean;
   supportWhatsApp?: string;
+  telegramChatId?: string;
 }
 
 export interface User {
@@ -49,6 +51,8 @@ export interface User {
   // Mongo ObjectId приходит строкой, поэтому храним как string
   companyId?: string;
   name?: string;
+  telegramId?: number;
+  telegramUsername?: string;
 }
 
 export interface AuthState {
@@ -140,5 +144,15 @@ export interface AchievementProgress {
   progress: number; // Прогресс в процентах (0-100)
   completed: boolean; // Завершено ли достижение
   completedAt?: string; // Дата завершения
+}
+
+export interface TelegramAuthData {
+  id: number;
+  first_name: string;
+  last_name?: string;
+  username?: string;
+  photo_url?: string;
+  auth_date: number;
+  hash: string;
 }
 

@@ -16,26 +16,26 @@ export async function generateMetadata({
   
   if (!code || code.length !== 8) {
     return {
-      title: "Компания не найдена | feed Back",
+      title: "Компания не найдена | Sayless",
       description: "Компания с указанным кодом не найдена.",
     };
   }
 
   try {
     const company = await serverApiClient.getCompanyByCode(code);
-    
+
     if (!company) {
       return {
-        title: "Компания не найдена | feed Back",
+        title: "Компания не найдена | Sayless",
         description: "Компания с указанным кодом не найдена.",
       };
     }
 
     const companyName = company.name || "Компания";
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://feedbackhub.com";
-    
+    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "https://sayless.app";
+
     return {
-      title: `Отправить отзыв в ${companyName} | feed Back`,
+      title: `Отправить отзыв в ${companyName} | Sayless`,
       description: `Отправьте анонимный отзыв в ${companyName}. Безопасная платформа для честной обратной связи, жалоб, похвал и предложений.`,
       keywords: `отзыв, ${companyName}, обратная связь, анонимные отзывы, feedback, жалобы, предложения`,
       openGraph: {
@@ -43,7 +43,7 @@ export async function generateMetadata({
         description: `Отправьте анонимный отзыв в ${companyName}. Безопасная платформа для честной обратной связи.`,
         type: "website",
         locale: "ru_RU",
-        siteName: "feed Back",
+        siteName: "Sayless",
         url: `${siteUrl}/${code}`,
         images: company.logoUrl ? [
           {
@@ -72,7 +72,7 @@ export async function generateMetadata({
   } catch (error) {
     console.error("Error generating metadata:", error);
     return {
-      title: "feed Back — Анонимные отзывы для компаний",
+      title: "Sayless — Анонимные отзывы для компаний",
       description: "Отправляйте анонимные отзывы в свою компанию. Безопасная платформа для честной обратной связи.",
     };
   }

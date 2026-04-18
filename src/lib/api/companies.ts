@@ -283,7 +283,7 @@ export const adminApi = {
     return [
       {
         id: "admin-1",
-        email: "admin@feedbackhub.com",
+        email: "admin@sayless.app",
         name: "Super Admin",
         role: "super_admin",
         createdAt: "2024-01-01",
@@ -291,13 +291,25 @@ export const adminApi = {
       },
       {
         id: "admin-2",
-        email: "moderator@feedbackhub.com",
+        email: "moderator@sayless.app",
         name: "Moderator",
         role: "admin",
         createdAt: "2024-02-15",
         lastLogin: "2024-03-15",
       },
     ];
+  },
+};
+
+export const companyApi = {
+  /**
+   * Привязать Telegram-чат к компании
+   */
+  linkTelegram: async (companyId: string, telegramChatId: string): Promise<ApiResponse<{ companyId: string; telegramChatId: string }>> => {
+    return apiClient.post<ApiResponse<{ companyId: string; telegramChatId: string }>>(
+      `/companies/${companyId}/link-telegram`,
+      { telegramChatId }
+    );
   },
 };
 

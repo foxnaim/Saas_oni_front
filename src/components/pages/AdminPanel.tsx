@@ -1,2073 +1,412 @@
 'use client';
 
-import { useState, useEffect, useRef, Fragment } from "react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import Image from "next/image";
-import { Dialog, Transition } from "@headlessui/react";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  FiSearch,
-  FiFilter,
-  FiPlus,
-  FiX,
-  FiCopy,
-  FiEdit,
-  FiCheck,
-  FiTrash2,
-  FiRefreshCw,
-  FiEye,
-  FiEyeOff,
-  FiLock,
-  FiMail,
-  FiAlertCircle,
-} from "react-icons/fi";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AdminHeader } from "@/components/AdminHeader";
-import { useCompanies, useCreateCompany, useDeleteCompany, usePlans, useUpdateCompany, useUpdateCompanyStatus, useUpdateCompanyPlan, useUpdateCompanyPassword } from "@/lib/query";
-import { getTranslatedValue } from "@/lib/utils/translations";
-import { toast } from "sonner";
-import type { Company, CompanyStatus, PlanType } from "@/types";
-import { validatePasswordStrength } from "@/lib/utils/validation";
-import { useAuth } from "@/lib/redux";
+import {
+  useCompanies,
+  useMessages,
+  usePlatformStats,
+} from "@/lib/query";
+import { useSocketMessages } from "@/lib/websocket/useSocket";
+import { MESSAGE_STATUSES, COMPANY_STATUSES } from "@/lib/utils/constants";
+import {
+  FiHome,
+  FiMessageSquare,
+  FiDollarSign,
+  FiBarChart2,
+  FiUsers,
+  FiSettings,
+  FiArrowRight,
+  FiActivity,
+  FiCheckCircle,
+  FiAlertCircle,
+  FiClock,
+  FiZap,
+} from "react-icons/fi";
 
-// Константы статусов компании
-const COMPANY_STATUS: Record<string, CompanyStatus> = {
-  ACTIVE: "Активна",
-  TRIAL: "Пробная",
-  BLOCKED: "Заблокирована",
+/* ─── helpers ──────────────────────────────────────────────────────────── */
+const statusMatches = (actual: string | undefined, expected: string) =>
+  actual != null && String(actual).trim() === expected;
+
+const fmtDate = (d: string | Date): string => {
+  const date = typeof d === "string" ? new Date(d) : d;
+  if (isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("ru-RU", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 };
 
-const PLAN_OPTIONS = ["Пробный", "Стандарт", "Про"] as const;
+/* ─── quick links config ───────────────────────────────────────────────── */
+const QUICK_LINKS = [
+  { href: "/admin", label: "COMPANIES", icon: FiHome, accent: "#CCFF00" },
+  { href: "/admin/messages", label: "MESSAGES", icon: FiMessageSquare, accent: "#FF3D00" },
+  { href: "/admin/plans", label: "PLANS", icon: FiDollarSign, accent: "#CCFF00" },
+  { href: "/admin/analytics", label: "ANALYTICS", icon: FiBarChart2, accent: "#FF3D00" },
+  { href: "/admin/admins", label: "ADMINS", icon: FiUsers, accent: "#CCFF00" },
+  { href: "/admin/settings", label: "SETTINGS", icon: FiSettings, accent: "#FF3D00" },
+] as const;
 
-// Проверяет, что дата валидна и не в прошлом
-const isDateValidAndFuture = (dateStr: string): boolean => {
-  if (!dateStr) return false;
-  try {
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return false;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    d.setHours(0, 0, 0, 0);
-    return d >= today;
-  } catch {
-    return false;
-  }
-};
+/* ─── stat card ────────────────────────────────────────────────────────── */
+interface StatCardProps {
+  label: string;
+  value: string | number;
+  sub?: string;
+  neon?: boolean;
+  loading?: boolean;
+}
+function StatCard({ label, value, sub, neon = false, loading }: StatCardProps) {
+  return (
+    <div
+      className={`
+        border-2 border-foreground shadow-brutal bg-card p-4 sm:p-6
+        flex flex-col gap-2
+        ${neon ? "bg-primary" : ""}
+      `}
+    >
+      <p
+        className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground"
+        style={{ letterSpacing: "0.15em" }}
+      >
+        {label}
+      </p>
+      {loading ? (
+        <Skeleton className="h-10 w-24 bg-muted" />
+      ) : (
+        <p
+          className={`
+            text-4xl sm:text-5xl font-mono font-black leading-none
+            ${neon ? "text-primary-foreground" : "text-foreground"}
+          `}
+        >
+          {value}
+        </p>
+      )}
+      {sub && (
+        <p className="text-xs font-mono text-muted-foreground mt-1">{sub}</p>
+      )}
+    </div>
+  );
+}
 
-const getDefaultPlanEndDate = (): string => {
-  const d = new Date();
-  d.setMonth(d.getMonth() + 1);
-  return d.toISOString().split("T")[0];
-};
+/* ─── system health dot ────────────────────────────────────────────────── */
+function HealthDot({ ok }: { ok: boolean }) {
+  return (
+    <span
+      className="inline-block w-3 h-3 border-2 border-foreground"
+      style={{ background: ok ? "#CCFF00" : "#FF3D00" }}
+    />
+  );
+}
 
-const AdminPanel = () => {
-  const { t } = useTranslation();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string | number | null>(null);
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "blocked">("all");
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [isViewOpen, setIsViewOpen] = useState(false);
-  const [isPlanModalOpen, setIsPlanModalOpen] = useState(false);
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
-  const [isBlockDialogOpen, setIsBlockDialogOpen] = useState(false);
-  const [isUnblockDialogOpen, setIsUnblockDialogOpen] = useState(false);
-  const [selectedPlan, setSelectedPlan] = useState<string>("");
-  const [planEndDate, setPlanEndDate] = useState<string>("");
-  const [panelNewPassword, setPanelNewPassword] = useState("");
-  const [panelConfirmPassword, setPanelConfirmPassword] = useState("");
-  const [showPanelPasswordSection, setShowPanelPasswordSection] = useState(false);
-  const [showPanelEmailSection, setShowPanelEmailSection] = useState(false);
-  const [panelNewEmail, setPanelNewEmail] = useState("");
-  const detailCloseRef = useRef<HTMLButtonElement | null>(null);
-  const createCloseRef = useRef<HTMLButtonElement | null>(null);
-  const viewCloseRef = useRef<HTMLButtonElement | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
-  const [newCompany, setNewCompany] = useState({
-    name: "",
-    adminEmail: "",
-    code: "",
-    password: "",
-    plan: "Пробный" as (typeof PLAN_OPTIONS)[number],
-  });
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showCreatePassword, setShowCreatePassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [lastPlanUpdatedCompany, setLastPlanUpdatedCompany] = useState<Company | null>(null);
-
-  const getStatusLabel = (status: CompanyStatus) => {
-    const value = String(status).toLowerCase();
-    if (value === COMPANY_STATUS.ACTIVE.toLowerCase()) return t("admin.active");
-    if (value === COMPANY_STATUS.TRIAL.toLowerCase()) return t("admin.trial");
-    if (value === COMPANY_STATUS.BLOCKED.toLowerCase()) return t("admin.blocked");
-    return status;
+/* ─── activity row ─────────────────────────────────────────────────────── */
+function ActivityRow({
+  id,
+  type,
+  status,
+  company,
+  date,
+}: {
+  id: string;
+  type: string;
+  status: string;
+  company: string;
+  date: string;
+}) {
+  const getStatusMark = (s: string) => {
+    if (statusMatches(s, MESSAGE_STATUSES.RESOLVED)) return { icon: FiCheckCircle, color: "#CCFF00" };
+    if (statusMatches(s, MESSAGE_STATUSES.NEW)) return { icon: FiAlertCircle, color: "#FF3D00" };
+    if (statusMatches(s, MESSAGE_STATUSES.IN_PROGRESS)) return { icon: FiClock, color: "#71717A" };
+    return { icon: FiZap, color: "#71717A" };
   };
-
-  const getPlanLabel = (plan: string) => {
-    const normalized = plan?.toLowerCase?.() || "";
-    if (["пробный", "trial", "бесплатный", "free", "сынақ", "тегін"].includes(normalized)) {
-      return t("admin.planTrial", { defaultValue: t("admin.trial") });
-    }
-    if (["стандарт", "standard"].includes(normalized)) {
-      return t("admin.planStandard", { defaultValue: plan });
-    }
-    if (["про", "pro"].includes(normalized)) {
-      return t("admin.planPro", { defaultValue: plan });
-    }
-    return plan;
-  };
-
-  const { user } = useAuth();
-  const { data: companies = [], isLoading, refetch } = useCompanies();
-  const { data: plans = [] } = usePlans();
-
-  // Проверка, является ли план пробным/бесплатным
-  const isTrialPlan = (planName?: string): boolean => {
-    if (!planName) return false;
-    const trialPlanNames = ['Пробный', 'Trial', 'Бесплатный', 'Free', 'Тегін', 'Сынақ'];
-    const normalized = planName.toLowerCase();
-    return trialPlanNames.some(name => name.toLowerCase() === normalized) || 
-           plans.some(p => {
-             const pName = typeof p.name === "string" ? p.name : getTranslatedValue(p.name);
-             return pName === planName && p.isFree === true;
-           });
-  };
-
-  // Получить компанию по ID
-  const getCompanyById = (id: string | number | null) => {
-    if (!id) return null;
-    return companies.find(c => {
-      const companyId = (c as any)?.id || (c as any)?._id;
-      return String(companyId) === String(id);
-    });
-  };
-  const { mutateAsync: createCompany, isPending: isCreating } = useCreateCompany({
-    onSuccess: async (data) => {
-      await refetch();
-      setSelectedCompanyId(data.id);
-      setIsCreateOpen(false);
-      toast.success(t("admin.createCompany"));
-    },
-    onError: (error: any) => {
-      // apiClient выбрасывает ApiError: { message: string, status: number, code?: string }
-      const backendMessage = String(error?.message || "").trim();
-      const errorStatus = error?.status || 0;
-      
-      // Маппинг сообщений об ошибках - проверяем в строгом порядке приоритета
-      let errorMessage = "";
-      const msgLower = backendMessage.toLowerCase();
-      
-      // 1. Проверка кода компании (самая специфичная)
-      if (backendMessage.includes("Company with this code already exists") || 
-          (msgLower.includes("code") && msgLower.includes("already exists"))) {
-        errorMessage = t("auth.companyCodeAlreadyExists");
-      }
-      // 2. Проверка имени компании
-      else if (backendMessage.includes("Company with this name already exists") || 
-               (msgLower.includes("name") && msgLower.includes("already exists") && msgLower.includes("company"))) {
-        errorMessage = t("auth.companyNameAlreadyExists");
-      }
-      // 3. Проверка email компании
-      else if (backendMessage.includes("Company with this email already exists") || 
-               (msgLower.includes("email") && msgLower.includes("already exists") && msgLower.includes("company"))) {
-        errorMessage = t("auth.companyEmailAlreadyExists");
-      }
-      // 4. Проверка email админа
-      else if (backendMessage.includes("Admin with this email already exists") || 
-               (msgLower.includes("email") && msgLower.includes("already exists") && msgLower.includes("admin"))) {
-        errorMessage = t("auth.adminEmailAlreadyExists");
-      }
-      // 5. Проверка email пользователя
-      else if (backendMessage.includes("User already exists") ||
-               backendMessage.includes("User with this email already exists") || 
-               (msgLower.includes("user") && msgLower.includes("already exists")) ||
-               (msgLower.includes("email") && msgLower.includes("already exists") && !msgLower.includes("company") && !msgLower.includes("admin"))) {
-        errorMessage = t("auth.userEmailAlreadyExists");
-      }
-      // 6. Остальные ошибки
-      else if (backendMessage.includes("Name, code, adminEmail, and password are required") || 
-               msgLower.includes("required")) {
-        errorMessage = t("auth.companyFieldsRequired");
-      }
-      else if (backendMessage.includes("Password must be at least")) {
-        errorMessage = t("auth.passwordMinLength", { length: 8 });
-      }
-      else if (backendMessage.includes("Access denied")) {
-        errorMessage = t("auth.accessDenied");
-      }
-      // 7. Если статус 409, но сообщение не распознано
-      else if (errorStatus === 409) {
-        errorMessage = t("auth.companyConflictError") || "Данные уже существуют. Проверьте уникальность имени, email и кода компании.";
-      }
-      // 8. Если есть сообщение, показываем общую ошибку на выбранном языке
-      else if (backendMessage && !backendMessage.includes("HTTP error")) {
-        errorMessage = t("common.error");
-      }
-      // 9. Общая ошибка
-      else {
-        errorMessage = t("common.error") || "Произошла ошибка при создании компании";
-      }
-      
-      // Всегда показываем toast с ошибкой
-      toast.error(errorMessage);
-    },
-  });
-
-  const { mutateAsync: deleteCompany, isPending: isDeleting } = useDeleteCompany({
-    onSuccess: async () => {
-      await refetch();
-      setIsViewOpen(false);
-      setIsDeleteDialogOpen(false);
-      setSelectedCompanyId(null);
-      toast.success(t("admin.companyDeleted") || "Компания удалена");
-      toast.info(t("admin.changesTakeEffectWithin5Minutes"));
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || t("common.error"));
-    },
-  });
-
-  const { mutateAsync: updateStatus, isPending: isUpdatingStatus } = useUpdateCompanyStatus({
-    onError: (error: Error) => {
-      toast.error(error.message || t("common.error"));
-    },
-  });
-
-  const { mutateAsync: updatePlan, isPending: isUpdatingPlan } = useUpdateCompanyPlan({
-    onSuccess: (updatedCompany) => {
-      if (selectedCompanyId && updatedCompany) {
-        const updatedId = (updatedCompany as any)?.id ?? (updatedCompany as any)?._id;
-        if (updatedId != null && String(updatedId) === String(selectedCompanyId)) {
-          setLastPlanUpdatedCompany(updatedCompany);
-          setTimeout(() => setLastPlanUpdatedCompany(null), 1000);
-        }
-      }
-      // НЕ вызываем refetch — он затирает статус блокировки при быстрых изменениях
-    },
-    onError: (error: Error) => {
-      toast.error(error.message || t("admin.planUpdateError"));
-    },
-  });
-
-  const { mutateAsync: updateCompanyPassword, isPending: isUpdatingPassword } = useUpdateCompanyPassword({
-    onSuccess: () => {
-      setPanelNewPassword("");
-      setPanelConfirmPassword("");
-      setShowPanelPasswordSection(false);
-      toast.success(t("admin.companyPasswordUpdated") || "Пароль компании обновлён");
-    },
-    onError: (error: any) => {
-      toast.error(error?.message || t("common.error"));
-    },
-  });
-
-  const { mutateAsync: updateCompany, isPending: isUpdatingCompany } = useUpdateCompany({
-    onSuccess: () => {
-      setPanelNewEmail("");
-      setShowPanelEmailSection(false);
-      toast.success(t("company.emailChanged") || "Email компании обновлён");
-      refetch();
-    },
-    onError: (error: any) => {
-      const msg = (error?.message || "").toLowerCase();
-      if (msg.includes("already")) {
-        toast.error(t("auth.emailAlreadyInUse") || "Этот email уже используется");
-      } else {
-        toast.error(error?.message || t("common.error"));
-      }
-    },
-  });
-
-  const handlePanelPasswordChange = async () => {
-    if (!selectedCompanyData?.id) return;
-    if (panelNewPassword !== panelConfirmPassword) {
-      toast.error(t("auth.passwordMismatch"));
-      return;
-    }
-    const passwordValidation = validatePasswordStrength(panelNewPassword);
-    if (!passwordValidation.isValid) {
-      const firstError = passwordValidation.errors[0];
-      toast.error(firstError || t("auth.passwordTooWeak"));
-      return;
-    }
-    await updateCompanyPassword({
-      id: selectedCompanyData.id,
-      password: panelNewPassword,
-    });
-  };
-
-  const handlePanelEmailChange = async () => {
-    if (!selectedCompanyData?.id || !panelNewEmail) return;
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(panelNewEmail)) {
-      toast.error(t("auth.invalidEmail"));
-      return;
-    }
-    await updateCompany({
-      id: selectedCompanyData.id,
-      updates: { adminEmail: panelNewEmail },
-    });
-  };
-
-  const generateCode = () =>
-    Math.random().toString(36).slice(2, 10).toUpperCase();
-
-  const filteredCompanies = companies.filter((company) => {
-    const matchesSearch =
-      company.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      company.adminEmail?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      company.code.toLowerCase().includes(searchQuery.toLowerCase());
-
-    // Сравниваем напрямую с реальными значениями статусов из БД, а не с переводами
-    const matchesStatus =
-      statusFilter === "all" ||
-      (statusFilter === "active" && company.status === COMPANY_STATUS.ACTIVE) ||
-      (statusFilter === "blocked" && company.status === COMPANY_STATUS.BLOCKED);
-
-    return matchesSearch && matchesStatus;
-  });
-
-  const toIdString = (id: any): string => {
-    if (id == null) return "";
-    if (typeof id === "object" && typeof id.toString === "function") return id.toString();
-    return String(id);
-  };
-  const isCompanySelected = (companyId: any) =>
-    selectedCompanyId != null && companyId != null && toIdString(selectedCompanyId) === toIdString(companyId);
-
-  // Определяем мобильный режим, чтобы не рендерить мобильный модал на десктопе
-  useEffect(() => {
-    const check = () => setIsMobile(typeof window !== "undefined" && window.innerWidth < 1024);
-    check();
-    window.addEventListener("resize", check);
-    return () => window.removeEventListener("resize", check);
-  }, []);
-
-  const getStatusColor = (status: string) => {
-    // Сравниваем с реальными значениями статусов из БД, а не с переводами
-    const normalizedStatus = String(status).trim();
-    if (normalizedStatus === COMPANY_STATUS.ACTIVE || normalizedStatus === "Активна") {
-      return "bg-success text-white"; /* Green */
-    }
-    if (normalizedStatus === COMPANY_STATUS.BLOCKED || normalizedStatus === "Заблокирована") {
-      return "bg-accent text-white"; /* #F64C72 */
-    }
-    if (normalizedStatus === COMPANY_STATUS.TRIAL || normalizedStatus === "Пробная") {
-      return "bg-muted text-muted-foreground"; /* #99738E */
-    }
-    return "bg-muted text-muted-foreground";
-  };
-
-  // Автовыбор первой компании при загрузке и после фильтра / поиска (только для десктопа)
-  useEffect(() => {
-    // На мобильных устройствах не выбираем автоматически - панель не должна открываться сама
-    if (isMobile) {
-      return;
-    }
-    if (filteredCompanies.length === 0) {
-      setSelectedCompanyId(null);
-      return;
-    }
-    // Если нет выбранной компании, выбираем первую
-    if (!selectedCompanyId) {
-      setSelectedCompanyId(filteredCompanies[0].id);
-      return;
-    }
-    // Если выбранная компания ушла из списка, выбираем первую
-    const exists = filteredCompanies.some((c) => toIdString((c as any)?.id ?? (c as any)?._id) === toIdString(selectedCompanyId));
-    if (!exists) {
-      setSelectedCompanyId(filteredCompanies[0].id);
-    }
-  }, [filteredCompanies, selectedCompanyId, isMobile]);
-
-  // Сброс полей смены пароля при смене компании
-  useEffect(() => {
-    setPanelNewPassword("");
-    setPanelConfirmPassword("");
-    setShowPanelPasswordSection(false);
-  }, [selectedCompanyId]);
-
-  const baseSelectedCompanyData =
-    (selectedCompanyId && filteredCompanies.find((c) => {
-      const cid = (c as any)?.id ?? (c as any)?._id;
-      return cid != null && toIdString(cid) === toIdString(selectedCompanyId);
-    })) ||
-    null;
-
-  // При смене плана — сразу показываем обновлённые данные в карточке
-  const selectedCompanyData =
-    lastPlanUpdatedCompany && selectedCompanyId && baseSelectedCompanyData
-      ? (() => {
-          const updatedId = (lastPlanUpdatedCompany as any)?.id ?? (lastPlanUpdatedCompany as any)?._id;
-          if (updatedId != null && String(updatedId) === String(selectedCompanyId)) {
-            return { ...baseSelectedCompanyData, ...lastPlanUpdatedCompany };
-          }
-          return baseSelectedCompanyData;
-        })()
-      : baseSelectedCompanyData;
-  
-  // Для мобильных: определяем, показывать ли модальное окно (только при явном выборе)
-  const shouldShowMobileModal = selectedCompanyId !== null && isMobile;
-
-  // Функция для вычисления дней до истечения тарифа
-  const calculateDaysUntilExpiry = (trialEndDate?: string): { days: number; expired: boolean } | null => {
-    if (!trialEndDate) return null;
-    try {
-      const endDate = new Date(trialEndDate);
-      const now = new Date();
-      const diffTime = endDate.getTime() - now.getTime();
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      return {
-        days: diffDays > 0 ? diffDays : 0,
-        expired: diffDays <= 0
-      };
-    } catch {
-      return null;
-    }
-  };
-
-  // Функция для получения правильной формы слова "день/дня/дней"
-  const getDaysText = (days: number): string => {
-    if (days === 1) return t("admin.day");
-    if (days > 1 && days < 5) return t("admin.days2");
-    return t("admin.days");
-  };
-
-  const expiryInfo = selectedCompanyData?.trialEndDate 
-    ? calculateDaysUntilExpiry(selectedCompanyData.trialEndDate)
-    : null;
+  const mark = getStatusMark(status);
+  const Icon = mark.icon;
 
   return (
-    <div className="flex flex-col h-screen bg-background overflow-hidden">
+    <div className="flex items-center gap-3 border-b border-border py-3 last:border-b-0">
+      <Icon style={{ color: mark.color }} className="w-4 h-4 flex-shrink-0" />
+      <code className="text-xs font-mono text-muted-foreground truncate w-24 flex-shrink-0">
+        {id.slice(0, 8)}…
+      </code>
+      <Badge
+        variant="outline"
+        className="text-[10px] font-mono uppercase border border-foreground px-1.5 py-0 flex-shrink-0"
+      >
+        {company}
+      </Badge>
+      <span className="text-xs font-mono text-muted-foreground uppercase tracking-wide flex-shrink-0">
+        {type}
+      </span>
+      <span className="text-xs font-mono text-muted-foreground ml-auto flex-shrink-0 hidden sm:block">
+        {fmtDate(date)}
+      </span>
+    </div>
+  );
+}
+
+/* ─── AdminPanel ────────────────────────────────────────────────────────── */
+const AdminPanel = () => {
+  const { t } = useTranslation();
+
+  const { data: companies = [], isLoading: companiesLoading } = useCompanies();
+  const { data: messagesResult, isLoading: messagesLoading } = useMessages(
+    undefined,
+    1,
+    20,
+    undefined,
+  );
+  const { data: platformStats, isLoading: statsLoading } = usePlatformStats();
+  const messages = messagesResult?.data ?? [];
+
+  useSocketMessages();
+
+  /* derived platform stats */
+  const stats = useMemo(() => {
+    const totalCompanies = companies.length;
+    const activeCompanies = companies.filter(
+      (c) => c.status === COMPANY_STATUSES.ACTIVE
+    ).length;
+    const totalMessages = messagesResult?.pagination?.total ?? messages.length;
+    const activeUsers = companies.filter(
+      (c) =>
+        c.status === COMPANY_STATUSES.ACTIVE ||
+        c.status === COMPANY_STATUSES.TRIAL
+    ).length;
+
+    // Revenue = count of non-trial plans (proxy)
+    const paidCompanies = companies.filter((c) => {
+      const p = (c.plan ?? "").toLowerCase();
+      return !["пробный", "trial", "free", "бесплатный", "тегін", "сынақ"].includes(p);
+    }).length;
+
+    return { totalCompanies, activeCompanies, totalMessages, activeUsers, paidCompanies };
+  }, [companies, messages, messagesResult]);
+
+  const isLoading = companiesLoading || messagesLoading;
+
+  /* recent 10 messages */
+  const recentMessages = useMemo(
+    () => messages.slice(0, 10),
+    [messages]
+  );
+
+  /* system health */
+  const isHealthy =
+    !statsLoading && (!platformStats || (platformStats.rooms !== undefined));
+
+  return (
+    <div className="min-h-screen bg-background">
       <AdminHeader />
-      
-      <div className="flex flex-col flex-1 overflow-hidden">
-        {/* Top Bar */}
-        <header className="flex-shrink-0 border-b border-border bg-card">
-            <div className="flex items-center justify-between px-4 sm:px-6 py-3 sm:py-4">
-            <h2 className="text-base sm:text-lg font-semibold text-foreground">{t("admin.companies")}</h2>
+
+      <main className="container px-4 sm:px-6 py-6 sm:py-10 space-y-8">
+
+        {/* ── Page title ── */}
+        <div className="border-b-2 border-foreground pb-4">
+          <h1 className="text-4xl sm:text-6xl font-black uppercase tracking-tight text-brutal text-foreground">
+            ADMIN PANEL
+          </h1>
+          <p className="text-xs font-mono text-muted-foreground mt-1 uppercase tracking-widest">
+            SAYLESS — PLATFORM OVERVIEW
+          </p>
+        </div>
+
+        {/* ── Stats grid ── */}
+        <section>
+          <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground mb-3">
+            // PLATFORM STATS
+          </p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <StatCard
+              label={t("admin.totalCompanies")}
+              value={stats.totalCompanies}
+              sub={`${stats.activeCompanies} ${t("admin.active").toLowerCase()}`}
+              loading={companiesLoading}
+            />
+            <StatCard
+              label={t("admin.totalMessages") || "TOTAL MESSAGES"}
+              value={stats.totalMessages}
+              loading={messagesLoading}
+              neon
+            />
+            <StatCard
+              label={t("admin.activeUsers") || "ACTIVE USERS"}
+              value={stats.activeUsers}
+              sub="active + trial"
+              loading={companiesLoading}
+            />
+            <StatCard
+              label={t("admin.paidPlans") || "PAID PLANS"}
+              value={stats.paidCompanies}
+              sub="non-trial companies"
+              loading={companiesLoading}
+            />
           </div>
-        </header>
+        </section>
 
-        {/* Main Dashboard */}
-        <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-          {/* Companies List */}
-          <div className="flex-1 flex flex-col overflow-hidden p-4 sm:p-6">
-            <div className="flex-shrink-0 mb-4 sm:mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-0">
-              <div>
-                <h3 className="text-xl sm:text-2xl font-bold text-foreground">{t("admin.companies")}</h3>
-                <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-                  {t("admin.manageCompanies")}
-                </p>
-              </div>
-              <Button size="sm" className="w-full sm:w-auto" onClick={() => {
-                setNewCompany({
-                  name: "",
-                  adminEmail: "",
-                  code: generateCode(),
-                  password: "",
-                  plan: "Пробный",
-                });
-                setConfirmPassword("");
-                setShowCreatePassword(false);
-                setShowConfirmPassword(false);
-                setIsCreateOpen(true);
-              }}>
-                <FiPlus className="h-4 w-4 mr-2" />
-                <span className="hidden sm:inline">{t("admin.createCompany")}</span>
-                <span className="sm:hidden">{t("common.create")}</span>
-              </Button>
-            </div>
+        {/* ── Quick links + System health ── */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-            <div className="flex-shrink-0 flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 mb-4 sm:mb-6 relative">
-              <div className="relative flex-1">
-                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder={t("admin.searchCompanies")}
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-10 text-sm sm:text-base"
-                  autoComplete="off"
-                />
-              </div>
-              <div className="relative">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className={`flex-shrink-0 ${isFilterOpen ? "ring-2 ring-ring" : ""}`}
-                  onClick={() => setIsFilterOpen((v) => !v)}
-                >
-                  <FiFilter className="h-4 w-4" />
-                </Button>
-                {isFilterOpen && (
-                  <div className="absolute right-0 mt-2 w-48 rounded-lg border border-border bg-card shadow-lg z-10">
-                    {[
-                      { key: "all", label: t("common.all") },
-                      { key: "active", label: t("admin.active") },
-                      { key: "blocked", label: t("admin.blocked") },
-                    ].map((item) => (
-                      <button
-                        key={item.key}
-                        className={`w-full text-left px-3 py-2 text-sm hover:bg-muted transition ${
-                          statusFilter === item.key ? "text-primary font-semibold" : "text-foreground"
-                        }`}
-                        onClick={() => {
-                          setStatusFilter(item.key as typeof statusFilter);
-                          setIsFilterOpen(false);
-                        }}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <Card className="flex-1 flex flex-col overflow-hidden min-h-0">
-              {/* Desktop Table */}
-              <div className="hidden lg:block flex-1 overflow-auto">
-                <table className="w-full">
-                  <thead>
-                  <tr className="border-b border-border text-left bg-muted/30">
-                    <th className="p-4 text-sm font-medium text-muted-foreground">{t("admin.companyName")}</th>
-                    <th className="p-4 text-sm font-medium text-muted-foreground">{t("admin.adminEmail")}</th>
-                    <th className="p-4 text-sm font-medium text-muted-foreground">{t("admin.status")}</th>
-                    <th className="p-4 text-sm font-medium text-muted-foreground">{t("admin.plan")}</th>
-                    <th className="p-4 text-sm font-medium text-muted-foreground">{t("admin.registration")}</th>
-                  </tr>
-                  </thead>
-                  <tbody>
-                    {isLoading ? (
-                      <tr>
-                        <td colSpan={5} className="p-8 text-center text-muted-foreground">
-                          {t("admin.loadingCompanies")}
-                        </td>
-                      </tr>
-                    ) : filteredCompanies.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="p-8 text-center text-muted-foreground">
-                          {t("admin.companiesNotFound")}
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredCompanies.map((company, index) => {
-                        const selected = isCompanySelected(company.id);
-                        const rowBg = selected ? "bg-primary/5" : "bg-card";
-                        return (
-                        <tr
-                          key={`${toIdString((company as any)?.id ?? (company as any)?._id)}-${index}`}
-                          className="border-b border-border/50 last:border-0 hover:bg-muted/30 cursor-pointer transition-colors relative"
-                          onClick={() => {
-                          const id = (company as any)?.id ?? (company as any)?._id;
-                          if (id != null) setSelectedCompanyId(toIdString(id));
-                        }}
-                        >
-                        <td className={`p-4 ${rowBg}`}>
-                          <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-full bg-[#553D67] flex items-center justify-center text-white font-semibold relative overflow-hidden flex-shrink-0">
-                              {company.logoUrl ? (
-                                <Image
-                                  src={company.logoUrl}
-                                  alt={company.name}
-                                  width={40}
-                                  height={40}
-                                  className="w-full h-full object-cover"
-                                  unoptimized
-                                />
-                              ) : (
-                                company.name.charAt(0)
-                              )}
-                              {selected && (
-                                <div className="absolute -top-1 -right-1 w-4 h-4 bg-primary rounded-full flex items-center justify-center border-2 border-background z-10">
-                                  <FiCheck className="h-2.5 w-2.5 text-white" />
-                                </div>
-                              )}
-                            </div>
-                            <span className={`font-medium ${selected ? "text-primary" : "text-foreground"}`}>
-                              {company.name}
-                            </span>
-                          </div>
-                        </td>
-                        <td className={`p-4 text-sm text-muted-foreground ${rowBg}`}>{company.adminEmail || "—"}</td>
-                        <td className={`p-4 ${rowBg}`}>
-                          <Badge className={getStatusColor(company.status)}>{getStatusLabel(company.status)}</Badge>
-                        </td>
-                        <td className={`p-4 ${rowBg}`}>
-                          <Badge variant="outline" className="bg-muted text-muted-foreground border-muted-foreground/20">
-                            {getPlanLabel(company.plan)}
-                          </Badge>
-                        </td>
-                        <td className={`p-4 ${rowBg}`}>
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-muted-foreground">{company.registered}</span>
-                          </div>
-                        </td>
-                      </tr>
-                      );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Mobile Cards */}
-              <div className="lg:hidden flex-1 overflow-auto space-y-3 p-4">
-                {isLoading ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    {t("admin.loadingCompanies")}
-                  </div>
-                ) : filteredCompanies.length === 0 ? (
-                  <div className="text-center py-8 text-muted-foreground">
-                    {t("admin.companiesNotFound")}
-                  </div>
-                ) : (
-                  filteredCompanies.map((company, index) => (
-                    <Card
-                      key={`${toIdString((company as any)?.id ?? (company as any)?._id)}-${index}`}
-                      className={`p-4 cursor-pointer transition-colors relative ${
-                        isCompanySelected(company.id) ? "bg-primary/5 border-primary border-2" : "border-border"
-                      }`}
-                      onClick={() => {
-                          const id = (company as any)?.id ?? (company as any)?._id;
-                          if (id != null) setSelectedCompanyId(toIdString(id));
-                        }}
-                    >
-                      {isCompanySelected(company.id) && (
-                        <div className="absolute top-2 right-2 w-5 h-5 bg-primary rounded-full flex items-center justify-center">
-                          <FiCheck className="h-3 w-3 text-white" />
-                        </div>
-                      )}
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className="w-10 h-10 rounded-md bg-[#553D67] flex items-center justify-center text-white font-semibold flex-shrink-0 relative">
-                          {company.name.charAt(0)}
-                          {isCompanySelected(company.id) && (
-                            <div className="absolute -top-1 -right-1 w-4 h-4 bg-primary rounded-full flex items-center justify-center border-2 border-background">
-                              <FiCheck className="h-2.5 w-2.5 text-white" />
-                            </div>
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <h4 className={`font-medium truncate ${isCompanySelected(company.id) ? "text-primary" : "text-foreground"}`}>
-                            {company.name}
-                          </h4>
-                          <p className="text-xs text-muted-foreground truncate">{company.adminEmail || "—"}</p>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge className={`${getStatusColor(company.status)} text-xs`}>{getStatusLabel(company.status)}</Badge>
-                        <Badge variant="outline" className="bg-muted text-muted-foreground border-muted-foreground/20 text-xs">
-                          {getPlanLabel(company.plan)}
-                        </Badge>
-                        <span className="text-xs text-muted-foreground ml-auto">{company.registered}</span>
-                      </div>
-                    </Card>
-                  ))
-                )}
-              </div>
-            </Card>
-          </div>
-
-          {/* Company Detail Panel - Desktop */}
-          <aside className="hidden lg:block w-96 border-l border-border bg-card p-4 sm:p-6 space-y-4 sm:space-y-6">
-            <div>
-              <h4 className="text-base sm:text-lg font-semibold mb-3 sm:mb-4">{t("admin.companyDetails")}</h4>
-              
-              {selectedCompanyData ? (
-                <>
-                <Card
-                  key={selectedCompanyData.id}
-                  className="p-4 space-y-4 transition"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-md bg-[#553D67] flex items-center justify-center text-white font-semibold text-lg overflow-hidden flex-shrink-0">
-                      {selectedCompanyData.logoUrl ? (
-                        <Image
-                          src={selectedCompanyData.logoUrl}
-                          alt={selectedCompanyData.name}
-                          width={48}
-                          height={48}
-                          className="w-full h-full object-cover"
-                          unoptimized
-                        />
-                      ) : (
-                        selectedCompanyData.name.charAt(0)
-                      )}
-                    </div>
-                    <div className="flex-1">
-                      <h5 className="font-semibold text-foreground">{selectedCompanyData.name}</h5>
-                      <p className="text-sm text-muted-foreground">{selectedCompanyData.adminEmail}</p>
-                      <div className="flex items-center gap-2 mt-1">
-                        <Badge variant="outline" className="text-xs">
-                          {selectedCompanyData.code}
-                        </Badge>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          onClick={() => {
-                            navigator.clipboard?.writeText(selectedCompanyData.code);
-                            toast.success(t("common.copy") || "Скопировано");
-                          }}
-                        >
-                          <FiCopy className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-
-                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border">
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">{t("admin.status")}</p>
-                    <Badge className={getStatusColor(selectedCompanyData.status)}>
-                      {getStatusLabel(selectedCompanyData.status)}
-                    </Badge>
-                  </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground mb-1">{t("admin.plan")}</p>
-                    <div className="flex items-center gap-2">
-                        <Badge variant="outline">{getPlanLabel(selectedCompanyData.plan)}</Badge>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7"
-                        onClick={() => {
-                          // Проверяем, может ли пользователь редактировать план
-                          if (user?.role === "admin" && isTrialPlan(selectedCompanyData.plan)) {
-                            toast.error(t("admin.cannotEditTrialPlan") || "Обычные админы не могут редактировать пробный/бесплатный план");
-                            return;
-                          }
-                          setSelectedPlan(selectedCompanyData.plan);
-                          const existingDate = selectedCompanyData.trialEndDate || "";
-                          setPlanEndDate(isDateValidAndFuture(existingDate) ? existingDate : getDefaultPlanEndDate());
-                          setIsPlanModalOpen(true);
-                        }}
-                      >
-                        <FiEdit className="h-4 w-4 text-muted-foreground" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t border-border space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">{t("admin.totalMessages")}</span>
-                    <span className="text-sm font-semibold">{selectedCompanyData.messages}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">{t("admin.registration")}</span>
-                    <span className="text-sm font-semibold">{selectedCompanyData.registered}</span>
-                  </div>
-                </div>
-              </Card>
-              {user?.role === "super_admin" && (
-                <Card className="p-4 border-amber-200 dark:border-amber-800">
-                  <div className="flex flex-col gap-3">
-                    <div className="grid grid-cols-2 gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => { setShowPanelPasswordSection(!showPanelPasswordSection); setShowPanelEmailSection(false); }}
-                        className="w-full"
-                      >
-                        <FiLock className="h-4 w-4 mr-2" />
-                        {showPanelPasswordSection ? t("common.cancel") : t("company.changePassword")}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => { setShowPanelEmailSection(!showPanelEmailSection); setShowPanelPasswordSection(false); }}
-                        className="w-full"
-                      >
-                        <FiMail className="h-4 w-4 mr-2" />
-                        {showPanelEmailSection ? t("common.cancel") : (t("admin.changeEmail") || "Сменить email")}
-                      </Button>
-                    </div>
-                    {selectedCompanyData && isTrialPlan(selectedCompanyData.plan) && selectedCompanyData.trialEndDate && new Date(selectedCompanyData.trialEndDate) > new Date() && (
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="sm"
-                        className="w-full"
-                        onClick={async () => {
-                          if (!selectedCompanyData?.id) return;
-                          try {
-                            const { companyService } = await import("@/lib/query/services");
-                            await companyService.expireTrial(selectedCompanyData.id);
-                            toast.success(t("admin.trialExpired") || "Пробный период завершён");
-                            await refetch();
-                          } catch (err: any) {
-                            toast.error(err?.message || t("common.error"));
-                          }
-                        }}
-                      >
-                        <FiAlertCircle className="h-4 w-4 mr-2" />
-                        {t("admin.expireTrial") || "Завершить пробный период"}
-                      </Button>
-                    )}
-                    {showPanelPasswordSection && (
-                      <div className="space-y-3 p-3 bg-amber-50/50 dark:bg-amber-950/30 rounded-lg">
-                        <p className="text-sm text-amber-800 dark:text-amber-200">
-                          {t("admin.superAdminPasswordWarning")}
-                        </p>
-                        <div>
-                          <Label>{t("company.newPassword")}</Label>
-                          <Input
-                            type="password"
-                            value={panelNewPassword}
-                            onChange={(e) => setPanelNewPassword(e.target.value)}
-                            placeholder={t("admin.passwordMinLengthPlaceholder")}
-                            autoComplete="new-password"
-                          />
-                        </div>
-                        <div>
-                          <Label>{t("auth.confirmPassword")}</Label>
-                          <Input
-                            type="password"
-                            value={panelConfirmPassword}
-                            onChange={(e) => setPanelConfirmPassword(e.target.value)}
-                            placeholder={t("auth.confirmPassword")}
-                            autoComplete="new-password"
-                          />
-                        </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={handlePanelPasswordChange}
-                          disabled={isUpdatingPassword || !panelNewPassword || !panelConfirmPassword}
-                        >
-                          {isUpdatingPassword ? t("common.loading") : t("company.updatePassword")}
-                        </Button>
-                      </div>
-                    )}
-                    {showPanelEmailSection && (
-                      <div className="space-y-3 p-3 bg-amber-50/50 dark:bg-amber-950/30 rounded-lg">
-                        <p className="text-sm text-amber-800 dark:text-amber-200">
-                          {t("admin.changeCompanyEmailDescription") || "Смена email компании (также обновит email для входа)"}
-                        </p>
-                        <div>
-                          <Label>{t("company.newEmail") || "Новый email"}</Label>
-                          <Input
-                            type="email"
-                            value={panelNewEmail}
-                            onChange={(e) => setPanelNewEmail(e.target.value)}
-                            placeholder="new@email.com"
-                            autoComplete="email"
-                          />
-                        </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={handlePanelEmailChange}
-                          disabled={isUpdatingCompany || !panelNewEmail}
-                        >
-                          {isUpdatingCompany ? t("common.loading") : (t("admin.updateEmail") || "Обновить email")}
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </Card>
-              )}
-                </>
-              ) : (
-                <Card className="p-4">
-                  <p className="text-muted-foreground text-center">{t("admin.selectCompany")}</p>
-                </Card>
-              )}
-            </div>
-
-            <div className="space-y-3">
-              {selectedCompanyData && (
-                <>
-                  {selectedCompanyData.status === COMPANY_STATUS.ACTIVE ? (
-                    <Button
-                      className="w-full"
-                      variant="destructive"
-                      disabled={isUpdatingStatus}
-                      onClick={() => {
-                        setIsBlockDialogOpen(true);
-                      }}
-                    >
-                      {t("admin.blockCompany")}
-                    </Button>
-                  ) : selectedCompanyData.status === COMPANY_STATUS.BLOCKED ? (
-                    <Button
-                      className="w-full"
-                      disabled={isUpdatingStatus}
-                      onClick={() => {
-                        setIsUnblockDialogOpen(true);
-                      }}
-                    >
-                      {t("admin.activateCompany")}
-                    </Button>
-                  ) : selectedCompanyData.status === COMPANY_STATUS.TRIAL ? (
-                    <Button
-                      className="w-full"
-                      disabled={isUpdatingStatus}
-                      onClick={() => {
-                        setIsUnblockDialogOpen(true);
-                      }}
-                    >
-                      {t("admin.activateCompany")}
-                    </Button>
-                  ) : null}
-                  <Button
-                    className="w-full"
-                    variant="destructive"
-                    onClick={() => {
-                      setIsDeleteDialogOpen(true);
-                    }}
-                    disabled={isDeleting}
+          {/* Quick links */}
+          <section className="lg:col-span-2">
+            <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground mb-3">
+              // QUICK NAVIGATION
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {QUICK_LINKS.map((link) => {
+                const Icon = link.icon;
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href as any}
+                    className="group border-2 border-foreground bg-card p-4 flex flex-col gap-3 hover:bg-foreground transition-colors shadow-brutal"
                   >
-                    <FiTrash2 className="h-4 w-4 mr-2" />
-                    {t("admin.deleteCompany") || "Удалить компанию"}
-                  </Button>
-                </>
-              )}
+                    <Icon className="w-5 h-5 text-foreground group-hover:text-background transition-colors" />
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-mono font-bold uppercase tracking-wide text-foreground group-hover:text-background transition-colors">
+                        {link.label}
+                      </span>
+                      <FiArrowRight className="w-3 h-3 text-muted-foreground group-hover:text-background transition-colors" />
+                    </div>
+                  </Link>
+                );
+              })}
             </div>
+          </section>
 
-              <Card
-                key={`usage-${selectedCompanyData?.id ?? "none"}`}
-                className="p-4 bg-muted transition"
-              >
-              <h5 className="font-semibold text-sm mb-3">{t("admin.tariffExpiry")}</h5>
+          {/* System health */}
+          <section>
+            <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground mb-3">
+              // SYSTEM HEALTH
+            </p>
+            <div className="border-2 border-foreground bg-card shadow-brutal p-4 sm:p-6 h-full">
               <div className="space-y-3">
-                {expiryInfo ? (
-                  <div>
-                    <div className="flex justify-between text-sm mb-1">
-                      <span className="text-muted-foreground">{t("admin.daysUntilExpiry")}</span>
-                      <span className={`font-semibold ${expiryInfo.expired ? "text-destructive" : ""}`}>
-                        {expiryInfo.expired ? (
-                          <Badge variant="destructive" className="text-xs">
-                            {t("admin.tariffExpired")}
-                          </Badge>
-                        ) : (
-                          t("admin.daysRemaining", { 
-                            count: expiryInfo.days, 
-                            days: getDaysText(expiryInfo.days) 
-                          })
-                        )}
+                {[
+                  {
+                    label: "API SERVER",
+                    ok: !statsLoading,
+                  },
+                  {
+                    label: "DATABASE",
+                    ok: !companiesLoading && companies.length >= 0,
+                  },
+                  {
+                    label: "WEBSOCKET",
+                    ok: true,
+                  },
+                  {
+                    label: "PLATFORM",
+                    ok: isHealthy,
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.label}
+                    className="flex items-center justify-between border-b border-border pb-3 last:border-b-0 last:pb-0"
+                  >
+                    <span className="text-xs font-mono font-bold uppercase tracking-wide">
+                      {item.label}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <HealthDot ok={item.ok} />
+                      <span
+                        className="text-xs font-mono"
+                        style={{ color: item.ok ? "#CCFF00" : "#FF3D00" }}
+                      >
+                        {item.ok ? "OK" : "ERR"}
                       </span>
                     </div>
                   </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">
-                    {t("admin.noExpiryDate") || "Дата окончания не установлена"}
+                ))}
+                {platformStats && (
+                  <div className="pt-2 space-y-1 border-t border-border">
+                    <div className="flex justify-between text-xs font-mono text-muted-foreground">
+                      <span>ROOMS</span>
+                      <span className="font-bold text-foreground">
+                        {platformStats.rooms}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs font-mono text-muted-foreground">
+                      <span>LATENCY</span>
+                      <span className="font-bold text-foreground">
+                        {platformStats.latency}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-xs font-mono text-muted-foreground">
+                      <span>RETENTION</span>
+                      <span className="font-bold text-foreground">
+                        {platformStats.retention}
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>
-            </Card>
-          </aside>
+            </div>
+          </section>
         </div>
 
-        {/* Mobile Company Detail Panel - Bottom Panel */}
-        <Transition show={shouldShowMobileModal} as={Fragment}>
-          <Dialog
-            as="div"
-            className="lg:hidden relative z-50"
-            onClose={(value) => {
-              setSelectedCompanyId(null);
-              // Управляем фокусом при закрытии
-              if (!value) {
-                requestAnimationFrame(() => {
-                  const activeElement = document.activeElement as HTMLElement;
-                  if (activeElement && activeElement !== document.body && activeElement.blur) {
-                    activeElement.blur();
-                  }
-                });
-              }
-            }}
-            initialFocus={detailCloseRef}
-          >
-            <Transition.Child
-              as={Fragment}
-              enter="ease-out duration-300"
-              enterFrom="opacity-0"
-              enterTo="opacity-100"
-              leave="ease-in duration-200"
-              leaveFrom="opacity-100"
-              leaveTo="opacity-0"
+        {/* ── Recent activity ── */}
+        <section>
+          <div className="flex items-center gap-3 mb-3">
+            <p className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground">
+              // RECENT ACTIVITY
+            </p>
+            <FiActivity className="w-3.5 h-3.5 text-muted-foreground" />
+            <Link
+              href="/admin/messages"
+              className="ml-auto text-xs font-mono font-bold uppercase tracking-wide text-primary hover:underline flex items-center gap-1"
             >
-              <div className="fixed inset-0 bg-black/50" onClick={() => setSelectedCompanyId(null)} />
-            </Transition.Child>
+              VIEW ALL <FiArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
 
-            <div className="fixed inset-0 overflow-hidden pointer-events-none">
-              <div className="flex min-h-full items-end justify-center">
-                <Transition.Child
-                  as={Fragment}
-                  enter="ease-out duration-300"
-                  enterFrom="opacity-0 translate-y-full"
-                  enterTo="opacity-100 translate-y-0"
-                  leave="ease-in duration-200"
-                  leaveFrom="opacity-100 translate-y-0"
-                  leaveTo="opacity-0 translate-y-full"
+          <div className="border-2 border-foreground bg-card shadow-brutal">
+            {/* Table header */}
+            <div className="hidden sm:grid grid-cols-[1fr_auto_auto_auto_auto] gap-3 px-4 py-2 bg-foreground">
+              {["ID", "COMPANY", "TYPE", "STATUS", "DATE"].map((h) => (
+                <span
+                  key={h}
+                  className="text-[10px] font-mono font-black uppercase tracking-widest text-background"
                 >
-                  <Dialog.Panel className="w-full max-h-[85vh] overflow-y-auto bg-card border-t border-border shadow-xl rounded-t-2xl transform transition-all pointer-events-auto">
-                    <div className="p-4 sm:p-6 space-y-4 sm:space-y-6">
-                      <div className="flex items-center justify-between mb-2 sticky top-0 bg-card z-10 pb-2 border-b border-border">
-                        <Dialog.Title className="text-base sm:text-lg font-semibold">{t("admin.companyDetails")}</Dialog.Title>
-                        <Button
-                          ref={detailCloseRef}
-                          variant="ghost"
-                          size="icon"
-                          className="cursor-pointer"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedCompanyId(null);
-                          }}
-                        >
-                          <FiX className="h-5 w-5" />
-                        </Button>
-                      </div>
-                      
-                      {selectedCompanyData && (
-                        <>
-                          <Card className="p-4 space-y-4">
-                            <div className="flex items-center gap-3">
-                              <div className="w-12 h-12 rounded-md bg-[#553D67] flex items-center justify-center text-white font-semibold text-lg flex-shrink-0 overflow-hidden">
-                                {selectedCompanyData.logoUrl ? (
-                                  <Image
-                                    src={selectedCompanyData.logoUrl}
-                                    alt={selectedCompanyData.name}
-                                    width={48}
-                                    height={48}
-                                    className="w-full h-full object-cover"
-                                    unoptimized
-                                  />
-                                ) : (
-                                  selectedCompanyData.name.charAt(0)
-                                )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <h5 className="font-semibold text-foreground truncate">{selectedCompanyData.name}</h5>
-                                <p className="text-sm text-muted-foreground truncate">{selectedCompanyData.adminEmail}</p>
-                                <div className="flex items-center gap-2 mt-1">
-                                  <Badge variant="outline" className="text-xs">
-                                    {selectedCompanyData.code}
-                                  </Badge>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-7 w-7"
-                                    onClick={() => {
-                                      navigator.clipboard?.writeText(selectedCompanyData.code);
-                                      toast.success(t("common.copy") || "Скопировано");
-                                    }}
-                                  >
-                                    <FiCopy className="h-4 w-4 text-muted-foreground" />
-                                  </Button>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border">
-                              <div>
-                                <p className="text-xs text-muted-foreground mb-1">{t("admin.status")}</p>
-                                <Badge className={getStatusColor(selectedCompanyData.status)}>
-                                  {getStatusLabel(selectedCompanyData.status)}
-                                </Badge>
-                              </div>
-                              <div>
-                                <p className="text-xs text-muted-foreground mb-1">{t("admin.plan")}</p>
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="outline">{getPlanLabel(selectedCompanyData.plan)}</Badge>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="h-7 w-7"
-                                    onClick={() => {
-                                      setSelectedPlan(selectedCompanyData.plan);
-                                      const existingDate = selectedCompanyData.trialEndDate || "";
-                                      setPlanEndDate(isDateValidAndFuture(existingDate) ? existingDate : getDefaultPlanEndDate());
-                                      setIsPlanModalOpen(true);
-                                    }}
-                                  >
-                                    <FiEdit className="h-4 w-4 text-muted-foreground" />
-                                  </Button>
-                                </div>
-                              </div>
-                            </div>
-
-                            <div className="pt-4 border-t border-border space-y-3">
-                              <div className="flex justify-between">
-                                <span className="text-sm text-muted-foreground">{t("admin.totalMessages")}</span>
-                                <span className="text-sm font-semibold">{selectedCompanyData.messages}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-sm text-muted-foreground">{t("admin.registration")}</span>
-                                <span className="text-sm font-semibold">{selectedCompanyData.registered}</span>
-                              </div>
-                            </div>
-                          </Card>
-
-                          <Card
-                            key={`usage-mobile-${selectedCompanyData?.id ?? "none"}`}
-                            className="p-4 bg-muted transition"
-                          >
-                            <h5 className="font-semibold text-sm mb-3">{t("admin.tariffExpiry")}</h5>
-                            <div className="space-y-3">
-                              {expiryInfo ? (
-                                <div>
-                                  <div className="flex justify-between text-sm mb-1">
-                                    <span className="text-muted-foreground">{t("admin.daysUntilExpiry")}</span>
-                                    <span className={`font-semibold ${expiryInfo.expired ? "text-destructive" : ""}`}>
-                                      {expiryInfo.expired ? (
-                                        <Badge variant="destructive" className="text-xs">
-                                          {t("admin.tariffExpired")}
-                                        </Badge>
-                                      ) : (
-                                        t("admin.daysRemaining", { 
-                                          count: expiryInfo.days, 
-                                          days: getDaysText(expiryInfo.days) 
-                                        })
-                                      )}
-                                    </span>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="text-sm text-muted-foreground">
-                                  {t("admin.noExpiryDate") || "Дата окончания не установлена"}
-                                </div>
-                              )}
-                            </div>
-                          </Card>
-
-                          {user?.role === "super_admin" && (
-                            <Card className="p-4 border-amber-200 dark:border-amber-800">
-                              <div className="flex flex-col gap-3">
-                                <div className="grid grid-cols-2 gap-2">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => { setShowPanelPasswordSection(!showPanelPasswordSection); setShowPanelEmailSection(false); }}
-                                    className="w-full"
-                                  >
-                                    <FiLock className="h-4 w-4 mr-2" />
-                                    {showPanelPasswordSection ? t("common.cancel") : t("company.changePassword")}
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => { setShowPanelEmailSection(!showPanelEmailSection); setShowPanelPasswordSection(false); }}
-                                    className="w-full"
-                                  >
-                                    <FiMail className="h-4 w-4 mr-2" />
-                                    {showPanelEmailSection ? t("common.cancel") : (t("admin.changeEmail") || "Сменить email")}
-                                  </Button>
-                                </div>
-                                {selectedCompanyData && isTrialPlan(selectedCompanyData.plan) && selectedCompanyData.trialEndDate && new Date(selectedCompanyData.trialEndDate) > new Date() && (
-                                  <Button
-                                    type="button"
-                                    variant="destructive"
-                                    size="sm"
-                                    className="w-full"
-                                    onClick={async () => {
-                                      if (!selectedCompanyData?.id) return;
-                                      try {
-                                        const { companyService } = await import("@/lib/query/services");
-                                        await companyService.expireTrial(selectedCompanyData.id);
-                                        toast.success(t("admin.trialExpired") || "Пробный период завершён");
-                                        await refetch();
-                                      } catch (err: any) {
-                                        toast.error(err?.message || t("common.error"));
-                                      }
-                                    }}
-                                  >
-                                    <FiAlertCircle className="h-4 w-4 mr-2" />
-                                    {t("admin.expireTrial") || "Завершить пробный период"}
-                                  </Button>
-                                )}
-                                {showPanelPasswordSection && (
-                                  <div className="space-y-3 p-3 bg-amber-50/50 dark:bg-amber-950/30 rounded-lg">
-                                    <p className="text-sm text-amber-800 dark:text-amber-200">
-                                      {t("admin.superAdminPasswordWarning")}
-                                    </p>
-                                    <div>
-                                      <Label>{t("company.newPassword")}</Label>
-                                      <Input
-                                        type="password"
-                                        value={panelNewPassword}
-                                        onChange={(e) => setPanelNewPassword(e.target.value)}
-                                        placeholder={t("admin.passwordMinLengthPlaceholder")}
-                                        autoComplete="new-password"
-                                      />
-                                    </div>
-                                    <div>
-                                      <Label>{t("auth.confirmPassword")}</Label>
-                                      <Input
-                                        type="password"
-                                        value={panelConfirmPassword}
-                                        onChange={(e) => setPanelConfirmPassword(e.target.value)}
-                                        placeholder={t("auth.confirmPassword")}
-                                        autoComplete="new-password"
-                                      />
-                                    </div>
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      onClick={handlePanelPasswordChange}
-                                      disabled={isUpdatingPassword || !panelNewPassword || !panelConfirmPassword}
-                                    >
-                                      {isUpdatingPassword ? t("common.loading") : t("company.updatePassword")}
-                                    </Button>
-                                  </div>
-                                )}
-                                {showPanelEmailSection && (
-                                  <div className="space-y-3 p-3 bg-amber-50/50 dark:bg-amber-950/30 rounded-lg">
-                                    <p className="text-sm text-amber-800 dark:text-amber-200">
-                                      {t("admin.changeCompanyEmailDescription") || "Смена email компании (также обновит email для входа)"}
-                                    </p>
-                                    <div>
-                                      <Label>{t("company.newEmail") || "Новый email"}</Label>
-                                      <Input
-                                        type="email"
-                                        value={panelNewEmail}
-                                        onChange={(e) => setPanelNewEmail(e.target.value)}
-                                        placeholder="new@email.com"
-                                        autoComplete="email"
-                                      />
-                                    </div>
-                                    <Button
-                                      type="button"
-                                      size="sm"
-                                      onClick={handlePanelEmailChange}
-                                      disabled={isUpdatingCompany || !panelNewEmail}
-                                    >
-                                      {isUpdatingCompany ? t("common.loading") : (t("admin.updateEmail") || "Обновить email")}
-                                    </Button>
-                                  </div>
-                                )}
-                              </div>
-                            </Card>
-                          )}
-
-                          <div className="space-y-3">
-                            <h5 className="text-sm font-semibold text-foreground">{t("admin.actions")}</h5>
-                            
-                            {selectedCompanyData.status === COMPANY_STATUS.ACTIVE ? (
-                              <Button
-                                className="w-full"
-                                variant="destructive"
-                                disabled={isUpdatingStatus}
-                                onClick={() => {
-                                  setIsBlockDialogOpen(true);
-                                }}
-                              >
-                                {t("admin.blockCompany")}
-                              </Button>
-                            ) : selectedCompanyData.status === COMPANY_STATUS.BLOCKED ? (
-                              <Button
-                                className="w-full"
-                                disabled={isUpdatingStatus}
-                                onClick={() => {
-                                  setIsUnblockDialogOpen(true);
-                                }}
-                              >
-                                {t("admin.activateCompany")}
-                              </Button>
-                            ) : selectedCompanyData.status === COMPANY_STATUS.TRIAL ? (
-                              <Button
-                                className="w-full"
-                                disabled={isUpdatingStatus}
-                                onClick={() => {
-                                  setIsUnblockDialogOpen(true);
-                                }}
-                              >
-                                {t("admin.activateCompany")}
-                              </Button>
-                            ) : null}
-                            <Button
-                              className="w-full"
-                              variant="destructive"
-                              onClick={() => {
-                                setIsDeleteDialogOpen(true);
-                              }}
-                              disabled={isDeleting}
-                            >
-                              <FiTrash2 className="h-4 w-4 mr-2" />
-                              {t("admin.deleteCompany") || "Удалить компанию"}
-                            </Button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </Dialog.Panel>
-                </Transition.Child>
-              </div>
+                  {h}
+                </span>
+              ))}
             </div>
-          </Dialog>
-        </Transition>
-      </div>
 
-      {/* Create Company Dialog */}
-      <Transition show={isCreateOpen} as={Fragment}>
-        <Dialog
-          as="div"
-          className="relative z-50"
-          onClose={(value) => {
-            if (!isCreating) {
-              setIsCreateOpen(value);
-              // Сбрасываем форму при закрытии
-              if (!value) {
-                setNewCompany({
-                  name: "",
-                  adminEmail: "",
-                  code: generateCode(),
-                  password: "",
-                  plan: "Пробный",
-                });
-                setConfirmPassword("");
-                setShowCreatePassword(false);
-                setShowConfirmPassword(false);
-                // Управляем фокусом при закрытии
-                requestAnimationFrame(() => {
-                  const activeElement = document.activeElement as HTMLElement;
-                  if (activeElement && activeElement !== document.body && activeElement.blur) {
-                    activeElement.blur();
-                  }
-                });
-              }
-            }
-          }}
-          initialFocus={createCloseRef}
-        >
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-300"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-200"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-black/50" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center p-4">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-300"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-200"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-2xl transform overflow-hidden rounded-xl bg-card border border-border shadow-xl transition-all p-6 space-y-4">
-                  <Dialog.Title className="text-lg font-semibold text-foreground">
-                    {t("admin.createCompany")}
-                  </Dialog.Title>
-                  <form
-                    onSubmit={async (e) => {
-                      e.preventDefault();
-                      if (!newCompany.name.trim() || !newCompany.adminEmail.trim() || newCompany.code.length !== 8 || !newCompany.password.trim() || !confirmPassword.trim()) {
-                        toast.error(t("common.fillAllFields") || "Заполните все поля");
-                        return;
-                      }
-                      // Проверка совпадения паролей
-                      if (newCompany.password !== confirmPassword) {
-                        toast.error(t("auth.passwordMismatch"));
-                        return;
-                      }
-                      // Проверка надежности пароля
-                      const passwordValidation = validatePasswordStrength(newCompany.password);
-                      if (!passwordValidation.isValid) {
-                        // Показываем первую ошибку
-                        const firstError = passwordValidation.errors[0];
-                        toast.error(firstError || t("auth.passwordTooWeak"));
-                        return;
-                      }
-                      await createCompany({
-                        ...newCompany,
-                        status: COMPANY_STATUS.ACTIVE, // По умолчанию "Активна" для новых компаний
-                        messagesLimit: 100,
-                        storageLimit: 10,
-                      });
-                      setNewCompany({
-                        name: "",
-                        adminEmail: "",
-                        code: generateCode(),
-                        password: "",
-                        plan: "Пробный",
-                      });
-                      setConfirmPassword("");
-                      setShowCreatePassword(false);
-                      setShowConfirmPassword(false);
-                    }}
-                  >
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-sm text-foreground">{t("admin.companyName")}</label>
-                      <Input
-                        value={newCompany.name}
-                        onChange={(e) => setNewCompany({ ...newCompany, name: e.target.value })}
-                        placeholder="Acme Corporation"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm text-foreground">{t("admin.adminEmail")}</label>
-                      <Input
-                        type="email"
-                        value={newCompany.adminEmail}
-                        onChange={(e) => setNewCompany({ ...newCompany, adminEmail: e.target.value })}
-                        placeholder="admin@company.com"
-                        autoComplete="email"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm text-foreground">{t("admin.companyCode")}</label>
-                      <div className="flex gap-2">
-                        <Input
-                          value={newCompany.code}
-                          onChange={(e) => setNewCompany({ ...newCompany, code: e.target.value.toUpperCase() })}
-                          maxLength={8}
-                          placeholder="ACME0001"
-                          autoComplete="off"
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          onClick={() => setNewCompany((prev) => ({ ...prev, code: generateCode() }))}
-                        >
-                          <FiRefreshCw className="h-4 w-4" />
-                        </Button>
-                      </div>
-                      <p className="text-xs text-muted-foreground">{t("admin.companyCodeDescription")}</p>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm text-foreground">{t("admin.plan")}</label>
-                      <select
-                        className="w-full p-2 border rounded-md bg-background"
-                        value={newCompany.plan}
-                        onChange={(e) => setNewCompany({ ...newCompany, plan: e.target.value as (typeof PLAN_OPTIONS)[number] })}
-                      >
-                        {PLAN_OPTIONS.map((plan) => (
-                          <option key={plan} value={plan}>{getPlanLabel(plan)}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm text-foreground">{t("admin.password")}</label>
-                      <div className="relative">
-                        <Input
-                          type={showCreatePassword ? "text" : "password"}
-                          value={newCompany.password}
-                          onChange={(e) => setNewCompany({ ...newCompany, password: e.target.value })}
-                          placeholder={t("admin.passwordMinLengthPlaceholder") || "Минимум 8 символов"}
-                          minLength={8}
-                          autoComplete="new-password"
-                          className="pr-10"
-                        />
-                        <button
-                          type="button"
-                          className="absolute inset-y-0 right-2 flex items-center text-muted-foreground hover:text-foreground"
-                          onClick={() => setShowCreatePassword((v) => !v)}
-                          aria-label={showCreatePassword ? "Скрыть пароль" : "Показать пароль"}
-                        >
-                          {showCreatePassword ? (
-                            <FiEyeOff className="h-5 w-5" />
-                          ) : (
-                            <FiEye className="h-5 w-5" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-sm text-foreground">{t("auth.confirmPassword")}</label>
-                      <div className="relative">
-                        <Input
-                          type={showConfirmPassword ? "text" : "password"}
-                          value={confirmPassword}
-                          onChange={(e) => setConfirmPassword(e.target.value)}
-                          placeholder={t("auth.confirmPassword")}
-                          minLength={8}
-                          autoComplete="new-password"
-                          className="pr-10"
-                        />
-                        <button
-                          type="button"
-                          className="absolute inset-y-0 right-2 flex items-center text-muted-foreground hover:text-foreground"
-                          onClick={() => setShowConfirmPassword((v) => !v)}
-                          aria-label={showConfirmPassword ? "Скрыть пароль" : "Показать пароль"}
-                        >
-                          {showConfirmPassword ? (
-                            <FiEyeOff className="h-5 w-5" />
-                          ) : (
-                            <FiEye className="h-5 w-5" />
-                          )}
-                        </button>
-                      </div>
-                    </div>
+            <div className="px-4 divide-y divide-border">
+              {isLoading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="py-3 flex gap-3">
+                    <Skeleton className="h-4 w-24 bg-muted" />
+                    <Skeleton className="h-4 w-16 bg-muted" />
+                    <Skeleton className="h-4 w-20 bg-muted" />
                   </div>
-                  <div className="flex justify-end gap-3 pt-2 mt-4">
-                    <Button
-                      type="button"
-                      ref={createCloseRef}
-                      variant="outline"
-                      onClick={() => setIsCreateOpen(false)}
-                      disabled={isCreating}
-                    >
-                      {t("common.cancel")}
-                    </Button>
-                    <Button
-                      type="submit"
-                      disabled={isCreating}
-                    >
-                      {isCreating ? t("common.loading") : t("common.create")}
-                    </Button>
-                  </div>
-                  </form>
-                </Dialog.Panel>
-              </Transition.Child>
+                ))
+              ) : recentMessages.length === 0 ? (
+                <p className="text-xs font-mono text-muted-foreground py-8 text-center uppercase tracking-wide">
+                  NO ACTIVITY
+                </p>
+              ) : (
+                recentMessages.map((msg) => (
+                  <ActivityRow
+                    key={msg.id}
+                    id={msg.id}
+                    type={msg.type}
+                    status={msg.status}
+                    company={msg.companyCode}
+                    date={String(msg.createdAt ?? msg.updatedAt ?? "")}
+                  />
+                ))
+              )}
             </div>
           </div>
-        </Dialog>
-      </Transition>
-
-      {/* View company panel dialog */}
-      <Transition show={isViewOpen} as={Fragment}>
-        <Dialog
-          as="div"
-          className="relative z-50"
-          onClose={(value) => {
-            setIsViewOpen(value);
-            // Управляем фокусом при закрытии
-            if (!value) {
-              requestAnimationFrame(() => {
-                const activeElement = document.activeElement as HTMLElement;
-                if (activeElement && activeElement !== document.body) {
-                  activeElement.blur();
-                  document.body.focus();
-                }
-              });
-            }
-          }}
-          initialFocus={viewCloseRef}
-        >
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-300"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-200"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-black/50" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center p-4">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-300"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-200"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-4xl transform overflow-hidden rounded-xl bg-card border border-border shadow-xl transition-all p-6 space-y-5">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex items-start gap-3">
-                      <div className="w-12 h-12 rounded-md bg-[#553D67] flex items-center justify-center text-white font-semibold text-lg overflow-hidden flex-shrink-0">
-                        {selectedCompanyData?.logoUrl ? (
-                          <Image
-                            src={selectedCompanyData.logoUrl}
-                            alt={selectedCompanyData?.name || "Company logo"}
-                            width={48}
-                            height={48}
-                            className="w-full h-full object-cover"
-                            unoptimized
-                          />
-                        ) : (
-                          selectedCompanyData?.name?.charAt(0) || "C"
-                        )}
-                      </div>
-                      <div className="space-y-1">
-                        <Dialog.Title className="text-lg font-semibold text-foreground">
-                          {selectedCompanyData?.name || t("admin.companyDetails")}
-                        </Dialog.Title>
-                        <p className="text-sm text-muted-foreground">
-                          {selectedCompanyData?.adminEmail || "—"}
-                        </p>
-                        {selectedCompanyData && (
-                          <div className="flex items-center gap-2 mt-1">
-                            <Badge variant="outline" className="text-xs">
-                              {selectedCompanyData.code}
-                            </Badge>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => {
-                                navigator.clipboard?.writeText(selectedCompanyData.code);
-                                toast.success(t("common.copy") || "Скопировано");
-                              }}
-                            >
-                              <FiCopy className="h-4 w-4 text-muted-foreground" />
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <Button
-                      ref={viewCloseRef}
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setIsViewOpen(false)}
-                    >
-                      <FiX className="h-5 w-5" />
-                    </Button>
-                  </div>
-
-                  {selectedCompanyData ? (
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                      <Card className="p-4 space-y-3 col-span-2">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <Badge className={getStatusColor(selectedCompanyData.status)}>
-                            {selectedCompanyData.status}
-                          </Badge>
-                          <Badge variant="outline">{getPlanLabel(selectedCompanyData.plan)}</Badge>
-                          <Badge variant="outline" className="text-xs">
-                            {t("admin.registration")}: {selectedCompanyData.registered}
-                          </Badge>
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                          <div className="space-y-1">
-                            <p className="text-xs text-muted-foreground">{t("admin.totalMessages")}</p>
-                            <p className="text-base font-semibold">{selectedCompanyData.messages}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-xs text-muted-foreground">{t("admin.messagesThisMonth")}</p>
-                            <p className="text-base font-semibold">
-                              {selectedCompanyData.messagesThisMonth ?? "—"} / {selectedCompanyData.messagesLimit ?? "—"}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div>
-                            <p className="text-xs text-muted-foreground mb-1">{t("admin.messagesThisMonth")}</p>
-                            <div className="h-2 bg-muted rounded-full overflow-hidden">
-                              <div
-                                className="h-full bg-primary"
-                                style={{
-                                  width: selectedCompanyData.messagesLimit
-                                    ? `${Math.min(
-                                        100,
-                                        Math.round(
-                                          ((selectedCompanyData.messagesThisMonth || 0) /
-                                            selectedCompanyData.messagesLimit) *
-                                            100
-                                        )
-                                      )}%`
-                                    : "0%",
-                                }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </Card>
-
-                      <Card className="p-4 space-y-3">
-                        <h5 className="text-sm font-semibold text-foreground">
-                          {t("admin.actions")}
-                        </h5>
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">{t("admin.status")}</span>
-                            <Badge className={getStatusColor(selectedCompanyData.status)}>
-                              {selectedCompanyData.status}
-                            </Badge>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">{t("admin.plan")}</span>
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline">{getPlanLabel(selectedCompanyData.plan)}</Badge>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-7 w-7"
-                                onClick={() => {
-                                  setSelectedPlan(selectedCompanyData.plan);
-                                  const existingDate = selectedCompanyData.trialEndDate || "";
-                                  setPlanEndDate(isDateValidAndFuture(existingDate) ? existingDate : getDefaultPlanEndDate());
-                                  setIsPlanModalOpen(true);
-                                }}
-                              >
-                                <FiEdit className="h-4 w-4 text-muted-foreground" />
-                              </Button>
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-sm text-muted-foreground">{t("admin.registration")}</span>
-                            <span className="text-sm font-semibold">{selectedCompanyData.registered}</span>
-                          </div>
-                        </div>
-                        <div className="pt-4 border-t border-border space-y-2">
-                          <Button
-                            className="w-full"
-                            variant="destructive"
-                            onClick={() => {
-                              setIsDeleteDialogOpen(true);
-                            }}
-                            disabled={isDeleting}
-                          >
-                            <FiTrash2 className="h-4 w-4 mr-2" />
-                            {t("admin.deleteCompany") || "Удалить компанию"}
-                          </Button>
-                          {selectedCompanyData.status === COMPANY_STATUS.ACTIVE ? (
-                            <Button
-                              className="w-full"
-                              variant="destructive"
-                              disabled={isUpdatingStatus}
-                              onClick={() => {
-                                setIsBlockDialogOpen(true);
-                              }}
-                            >
-                              {t("admin.blockCompany")}
-                            </Button>
-                          ) : selectedCompanyData.status === COMPANY_STATUS.BLOCKED ? (
-                            <Button
-                              className="w-full"
-                              disabled={isUpdatingStatus}
-                              onClick={() => {
-                                setIsUnblockDialogOpen(true);
-                              }}
-                            >
-                              {t("admin.activateCompany")}
-                            </Button>
-                          ) : selectedCompanyData.status === COMPANY_STATUS.TRIAL ? (
-                            <Button
-                              className="w-full"
-                              disabled={isUpdatingStatus}
-                              onClick={() => {
-                                setIsUnblockDialogOpen(true);
-                              }}
-                            >
-                              {t("admin.activateCompany")}
-                            </Button>
-                          ) : null}
-                        </div>
-                      </Card>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">{t("admin.selectCompany")}</p>
-                  )}
-                  
-                  {selectedCompanyData && (
-                    <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-border">
-                      <Button
-                        className="w-full sm:w-auto sm:ml-auto"
-                        variant="destructive"
-                        onClick={() => {
-                          setIsDeleteDialogOpen(true);
-                        }}
-                        disabled={isDeleting}
-                      >
-                        <FiTrash2 className="h-4 w-4 mr-2" />
-                        {t("admin.deleteCompany") || "Удалить компанию"}
-                      </Button>
-                    </div>
-                  )}
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
-
-      {/* Update Plan Dialog */}
-      <Transition show={isPlanModalOpen} as={Fragment}>
-        <Dialog
-          as="div"
-          className="relative z-50"
-          onClose={() => setIsPlanModalOpen(false)}
-        >
-          <Transition.Child
-            as={Fragment}
-            enter="ease-out duration-300"
-            enterFrom="opacity-0"
-            enterTo="opacity-100"
-            leave="ease-in duration-200"
-            leaveFrom="opacity-100"
-            leaveTo="opacity-0"
-          >
-            <div className="fixed inset-0 bg-black/50" />
-          </Transition.Child>
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center p-4">
-              <Transition.Child
-                as={Fragment}
-                enter="ease-out duration-300"
-                enterFrom="opacity-0 scale-95"
-                enterTo="opacity-100 scale-100"
-                leave="ease-in duration-200"
-                leaveFrom="opacity-100 scale-100"
-                leaveTo="opacity-0 scale-95"
-              >
-                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-xl bg-card border border-border shadow-xl transition-all p-6 space-y-4">
-                  <Dialog.Title className="text-lg font-semibold text-foreground">
-                    {t("admin.changePlan")}
-                  </Dialog.Title>
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>{t("admin.plan")}</Label>
-                      <Select
-                        value={selectedPlan}
-                        onValueChange={setSelectedPlan}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder={t("admin.selectPlan")} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {plans
-                            .filter((plan) => {
-                              // Обычные админы не могут выбирать пробные/бесплатные планы
-                              if (user?.role === "admin") {
-                                const planName = getTranslatedValue(plan.name);
-                                return !isTrialPlan(planName);
-                              }
-                              return true;
-                            })
-                            .map((plan) => {
-                              const planName = getTranslatedValue(plan.name);
-                              return (
-                                <SelectItem key={plan.id} value={planName}>
-                                  {planName}
-                                </SelectItem>
-                              );
-                            })}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>{t("admin.planEndDate")}</Label>
-                      <Input
-                        type="date"
-                        value={planEndDate}
-                        onChange={(e) => setPlanEndDate(e.target.value)}
-                        min={new Date().toISOString().split("T")[0]}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        {t("admin.planEndDateDescription")}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex gap-3 pt-4">
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => {
-                        setIsPlanModalOpen(false);
-                        setSelectedPlan("");
-                        setPlanEndDate("");
-                      }}
-                    >
-                      {t("common.cancel")}
-                    </Button>
-                    <Button
-                      className="flex-1"
-                      disabled={isUpdatingPlan}
-                      onClick={async () => {
-                        if (!selectedCompanyId || !selectedPlan) {
-                          toast.error(t("common.fillAllFields"));
-                          return;
-                        }
-                        
-                        // Проверяем, может ли пользователь редактировать план
-                        const company = getCompanyById(selectedCompanyId);
-                        if (company) {
-                          if (user?.role === "admin" && isTrialPlan(company.plan)) {
-                            toast.error(t("admin.cannotEditTrialPlan") || "Обычные админы не могут редактировать пробный/бесплатный план");
-                            return;
-                          }
-                          // Проверяем, не пытается ли обычный админ установить пробный план
-                          if (user?.role === "admin" && isTrialPlan(selectedPlan)) {
-                            toast.error(t("admin.cannotEditTrialPlan") || "Обычные админы не могут редактировать пробный/бесплатный план");
-                            return;
-                          }
-                        }
-                        
-                        if (planEndDate && !isDateValidAndFuture(planEndDate)) {
-                          toast.error(t("admin.pastDateNotAllowed") || "Нельзя указать дату в прошлом. Выберите дату не ранее сегодняшнего дня.");
-                          return;
-                        }
-                        
-                        await updatePlan({
-                          id: selectedCompanyId,
-                          plan: selectedPlan as PlanType,
-                          planEndDate: planEndDate || undefined
-                        });
-                        toast.success(t("admin.planUpdated"));
-                        toast.info(t("admin.changesTakeEffectWithin5Minutes"));
-                        setIsPlanModalOpen(false);
-                        setSelectedPlan("");
-                        setPlanEndDate("");
-                      }}
-                    >
-                      {isUpdatingPlan ? t("common.loading") : t("common.save")}
-                    </Button>
-                  </div>
-                </Dialog.Panel>
-              </Transition.Child>
-            </div>
-          </div>
-        </Dialog>
-      </Transition>
-
-      {/* Delete Company Confirmation Dialog */}
-      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("admin.deleteCompany") || "Удалить компанию"}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("admin.deleteCompanyWarning") || "Вы уверены, что хотите удалить эту компанию? Это действие нельзя отменить. Все данные компании будут безвозвратно удалены."}
-              {selectedCompanyId && companies.find(c => c.id === selectedCompanyId) && (
-                <span className="block mt-2 font-semibold text-foreground">
-                  {companies.find(c => c.id === selectedCompanyId)?.name}
-                </span>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => {
-              setIsDeleteDialogOpen(false);
-            }}>
-              {t("common.cancel")}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={async () => {
-                if (selectedCompanyId) {
-                  try {
-                    await deleteCompany({ id: selectedCompanyId });
-                    setSelectedCompanyId(null);
-                  } catch (error) {
-                    toast.error(t("common.error"));
-                  }
-                }
-              }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={isDeleting}
-            >
-              {isDeleting ? t("common.loading") : (t("admin.deleteCompany") || "Удалить")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Block Company Confirmation Dialog */}
-      <AlertDialog open={isBlockDialogOpen} onOpenChange={setIsBlockDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("admin.blockCompany") || "Заблокировать компанию"}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("admin.blockCompanyWarning") || "Вы уверены, что хотите заблокировать эту компанию? Компания не сможет использовать сервис до разблокировки."}
-              {selectedCompanyId && companies.find(c => c.id === selectedCompanyId) && (
-                <span className="block mt-2 font-semibold text-foreground">
-                  {companies.find(c => c.id === selectedCompanyId)?.name}
-                </span>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => {
-              setIsBlockDialogOpen(false);
-            }}>
-              {t("common.cancel")}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={async () => {
-                if (selectedCompanyId && selectedCompanyData) {
-                  try {
-                    await updateStatus({ id: selectedCompanyId, status: COMPANY_STATUS.BLOCKED });
-                    toast.success(t("admin.companyBlocked"));
-                    toast.info(t("admin.changesTakeEffectWithin5Minutes"));
-                    setIsBlockDialogOpen(false);
-                    if (isViewOpen) {
-                      setIsViewOpen(false);
-                    }
-                  } catch (error) {
-                    toast.error(t("common.error"));
-                  }
-                }
-              }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={isUpdatingStatus}
-            >
-              {isUpdatingStatus ? t("common.loading") : (t("admin.blockCompany") || "Заблокировать")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Unblock Company Confirmation Dialog */}
-      <AlertDialog open={isUnblockDialogOpen} onOpenChange={setIsUnblockDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("admin.activateCompany") || "Разблокировать компанию"}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("admin.unblockCompanyWarning") || "Вы уверены, что хотите разблокировать эту компанию? Компания снова сможет использовать сервис."}
-              {selectedCompanyId && companies.find(c => c.id === selectedCompanyId) && (
-                <span className="block mt-2 font-semibold text-foreground">
-                  {companies.find(c => c.id === selectedCompanyId)?.name}
-                </span>
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => {
-              setIsUnblockDialogOpen(false);
-            }}>
-              {t("common.cancel")}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={async () => {
-                if (selectedCompanyId && selectedCompanyData) {
-                  try {
-                    await updateStatus({ id: selectedCompanyId, status: COMPANY_STATUS.ACTIVE });
-                    toast.success(t("admin.companyActivated"));
-                    toast.info(t("admin.changesTakeEffectWithin5Minutes"));
-                    setIsUnblockDialogOpen(false);
-                    if (isViewOpen) {
-                      setIsViewOpen(false);
-                    }
-                  } catch (error) {
-                    toast.error(t("common.error"));
-                  }
-                }
-              }}
-              disabled={isUpdatingStatus}
-            >
-              {isUpdatingStatus ? t("common.loading") : (t("admin.activateCompany") || "Разблокировать")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        </section>
+      </main>
     </div>
   );
 };

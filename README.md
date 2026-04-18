@@ -1,8 +1,8 @@
 <div align="center">
 
-# 💬 Anonymous-chat
+# Sayless Frontend
 
-**Real-time anonymous chat platform with WebSocket communication**
+**Next.js frontend for the Sayless anonymous feedback platform**
 
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
 ![Next.js](https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=next.js&logoColor=white)
@@ -16,17 +16,17 @@
 
 ## About
 
-Anonymous-chat is a real-time messaging platform where users can communicate without revealing their identity. Built with WebSocket for instant message delivery.
+Sayless is a Next.js frontend for an anonymous feedback platform. Users can submit feedback without revealing their identity. Built with real-time WebSocket communication and a clean, responsive interface.
 
 ## Features
 
-- 🎭 **Anonymous** — Chat without registration or identity
-- ⚡ **Real-time** — Instant message delivery via WebSocket
-- 🔒 **Privacy** — No data stored, no tracking
-- 🎨 **Modern UI** — Clean, responsive interface
-- 🐳 **Docker** — Containerized deployment
-- 🚀 **Railway** — Ready for cloud deployment
-- 🧪 **Tested** — Jest test suite included
+- **Anonymous** — Submit feedback without registration or identity
+- **Real-time** — Instant updates via WebSocket
+- **Privacy** — Minimal data retention, no tracking
+- **Modern UI** — Clean, responsive interface with Tailwind CSS
+- **Docker** — Containerized deployment
+- **Railway** — Ready for cloud deployment
+- **Tested** — Jest test suite included
 
 ## Tech Stack
 
@@ -56,4 +56,3 @@ docker-compose up
 ## License
 
 MIT © [foxnaim](https://github.com/foxnaim)
-# Saas_oni_front
